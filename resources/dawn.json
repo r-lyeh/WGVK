@@ -892,6 +892,13 @@
                 ]
             },
             {
+                "name": "begin ray tracing pass",
+                "returns": "ray tracing pass encoder",
+                "args": [
+                    {"name": "descriptor", "type": "ray tracing pass descriptor", "annotation": "const*"}
+                ]
+            },
+            {
                 "name": "copy buffer to buffer",
                 "args": [
                     {"name": "source", "type": "buffer"},
@@ -1390,6 +1397,30 @@
                 ]
             },
             {
+                "name": "create ray tracing acceleration container",
+                "no autolock": true,
+                "returns": "ray tracing acceleration container",
+                "args": [
+                    {"name": "descriptor", "type": "ray tracing accceleration container descriptor", "annotation": "const*"}
+                ]
+            },
+            {
+                "name": "create ray tracing shader binding table",
+                "no autolock": true,
+                "returns": "ray tracing shader binding table",
+                "args": [
+                    {"name": "descriptor", "type": "ray tracing shader binding table descriptor", "annotation": "const*"}
+                ]
+            },
+            {
+                "name": "create ray tracing pipeline",
+                "no autolock": true,
+                "returns": "ray tracing pipeline",
+                "args": [
+                    {"name": "descriptor", "type": "ray tracing pipeline descriptor", "annotation": "const*"}
+                ]
+            },
+            {
                 "name": "create sampler",
                 "returns": "sampler",
                 "args": [
@@ -1564,6 +1595,62 @@
                 "tags": ["dawn"],
                 "args": [
                     {"name": "descriptor", "type": "texture descriptor", "annotation": "const*"}
+                ]
+            }
+        ]
+    },
+    "ray tracing acceleration container" : {
+        "category": "object",
+        "tags": ["wgvk"],
+        "methods": [
+            {"name": "release"}
+        ]
+    },
+    "ray tracing shader binding table" : {
+        "category": "object",
+        "tags": ["wgvk"],
+        "methods": [
+
+        ]
+    },
+    "ray trcing pipeline" : {
+        "category": "object",
+        "tags": ["wgvk"],
+        "methods": [
+
+        ]
+    },
+    "ray tracing pass encoder" : {
+        "category": "object",
+        "tags": ["wgvk"],
+        "methods": [
+            {
+                "name": "end"
+            },
+            {
+                "name": "set pipeline",
+                "args": [
+                    {"name": "pipeline", "type": "ray tracing pipeline"}
+                ]
+            },
+            {
+                "name": "set bind group",
+                "args": [
+                    {"name": "group index", "type": "uint32_t"},
+                    {"name": "group", "type": "bind group", "optional": true},
+                    {"name": "dynamic offset count", "type": "size_t", "default": "0"},
+                    {"name": "dynamic offsets", "type": "uint32_t", "annotation": "const*", "length": "dynamic offset count", "default": "nullptr"}
+                ]
+            },
+            {
+                "name": "trace rays",
+                "args" : [
+                    {"name": "ray generation offset", "type": "uint32_t"},
+                    {"name": "ray hit offset", "type": "uint32_t"},
+                    {"name": "ray miss offset", "type": "uint32_t"},
+                    {"name": "width", "type": "uint32_t"},
+                    {"name": "height", "type": "uint32_t"},
+                    {"name": "depth", "type": "uint32_t"}
                 ]
             }
         ]
