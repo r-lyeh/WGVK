@@ -360,7 +360,14 @@ int main(int argc, char* argv[]) {
 
             std::cout << "WGPU_EXPORT " << return_type << " wgpu" << toPascalCase(key) << "(" << args_ss.str() << ");\n";
          }
-         else if (value["category"] == "object" && value.contains("methods")) {
+         else if (value["category"] == "object") {
+            if(!value.contains("methods")){
+                value.emplace("methods", json::array());
+            }
+            json releaseMethod;
+            releaseMethod["name"] = "release";
+            value["methods"].push_back(std::move(releaseMethod));
+            if(value.contains("methods")){
             for (const auto& method : value["methods"]) {
                 if (hasExcludedTag(method, excluded_tags)) continue;
                 std::string return_type_str = "void";
@@ -384,6 +391,7 @@ int main(int argc, char* argv[]) {
                 }
                 std::cout << "WGPU_EXPORT " << return_type_str << " wgpu" << toPascalCase(key) << toPascalCase(method["name"]) << "(" << args_ss.str() << ");\n";
             }
+          }
          }
     }
 

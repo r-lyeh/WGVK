@@ -3725,6 +3725,18 @@
             {"name": "code", "type": "uint32_t", "annotation": "const*", "length": "code size"}
         ]
     },
+    "external vk texture import": {
+        "category" : "structure",
+        "chained": "in",
+        "chain roots": "texture descriptor",
+        "tags": ["wgvk"],
+        "members": [
+            {"name": "vk image handle", "type": "void", "annotation": "*"},
+            {"name": "extents", "type": "extent 3D"},
+            {"name": "current layout", "type": "int32_t"},
+            {"name": "format", "type": "int32_t"}
+        ]
+    },
     "shader module WGSL descriptor": {
         "category": "typedef",
         "type": "shader source WGSL",
@@ -4091,7 +4103,8 @@
             {"value": 75, "name": "dynamic binding array limits", "tags": ["dawn"]},
             {"value": 76, "name": "bind group dynamic binding array", "tags": ["dawn"]},
             {"value": 77, "name": "texel buffer binding entry", "tags": ["dawn"]},
-            {"value": 78, "name": "texel buffer binding layout", "tags": ["dawn"]}
+            {"value": 78, "name": "texel buffer binding layout", "tags": ["dawn"]},
+            {"value": 78, "name": "external vk texture import", "tags": ["wgvk"]}
         ]
     },
     "texture": {
