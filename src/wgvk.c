@@ -1342,16 +1342,17 @@ WGPUInstance wgpuCreateInstance(const WGPUInstanceDescriptor* descriptor) {
     // 4. Specify Layers (if requested)
     VkLayerProperties availableLayers[64] = {0};
     uint32_t availableLayerCount = 0;
-    vkEnumerateInstanceLayerProperties(&availableLayerCount, NULL);
-    VkResult layerEnumResult = vkEnumerateInstanceLayerProperties(&availableLayerCount, availableLayers);
+    VkResult layerEnumResult = vkEnumerateInstanceLayerProperties(&availableLayerCount, NULL);
+    if(layerEnumResult){
+        layerEnumResult = vkEnumerateInstanceLayerProperties(&availableLayerCount, availableLayers);
+    }
+    if(layerEnumResult != VK_SUCCESS){
+        fprintf(stderr, "vkEnumerateInstanceLayerProperties failed: %s\n", vkErrorString(layerEnumResult));
+    }
 
     char nullTerminatedRequestedLayers[64][64] = {0};
     const char* nullTerminatedRequestedLayerPointers[64] = {0};
     uint32_t requestedAvailableLayerCount = 0;
-    
-    //for(uint32_t i = 0;i < availableLayerCount;i++){
-    //    printf("%s\n", availableLayers[i].layerName);
-    //}
     
     WGPUInstanceLayerSelection* ils = NULL;
     int debugUtilsAvailable = 0; // Check if debug utils was actually enabled
@@ -8342,6 +8343,7 @@ WGPUStatus wgpuAdapterGetInfo(WGPUAdapter adapter, WGPUAdapterInfo* info) {
 
     info->vendorID = props.vendorID;
     info->deviceID = props.deviceID;
+    printf("vendorID: %d, deviceID: %d\n", props.vendorID, props.deviceID);
     info->device = (WGPUStringView){adapter->cachedDeviceName, WGPU_STRLEN};
     info->description = (WGPUStringView){adapter->cachedDeviceDescription, WGPU_STRLEN};
     info->architecture = (WGPUStringView){
