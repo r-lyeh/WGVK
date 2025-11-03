@@ -1625,7 +1625,39 @@ static const char* PhysicalDeviceArchitecture_ToString(const PhysicalDeviceArchi
     }
     return "";
 }
-
+static const char* DriverID_ToString(const VkDriverId id){
+    switch(id){
+        case VK_DRIVER_ID_AMD_PROPRIETARY: return "AMD_PROPRIETARY";
+        case VK_DRIVER_ID_AMD_OPEN_SOURCE: return "AMD_OPEN_SOURCE";
+        case VK_DRIVER_ID_MESA_RADV: return "MESA_RADV";
+        case VK_DRIVER_ID_NVIDIA_PROPRIETARY: return "NVIDIA_PROPRIETARY";
+        case VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS: return "INTEL_PROPRIETARY_WINDOWS";
+        case VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA: return "INTEL_OPEN_SOURCE_MESA";
+        case VK_DRIVER_ID_IMAGINATION_PROPRIETARY: return "IMAGINATION_PROPRIETARY";
+        case VK_DRIVER_ID_QUALCOMM_PROPRIETARY: return "QUALCOMM_PROPRIETARY";
+        case VK_DRIVER_ID_ARM_PROPRIETARY: return "ARM_PROPRIETARY";
+        case VK_DRIVER_ID_GOOGLE_SWIFTSHADER: return "GOOGLE_SWIFTSHADER";
+        case VK_DRIVER_ID_GGP_PROPRIETARY: return "GGP_PROPRIETARY";
+        case VK_DRIVER_ID_BROADCOM_PROPRIETARY: return "BROADCOM_PROPRIETARY";
+        case VK_DRIVER_ID_MESA_LLVMPIPE: return "MESA_LLVMPIPE";
+        case VK_DRIVER_ID_MOLTENVK: return "MOLTENVK";
+        case VK_DRIVER_ID_COREAVI_PROPRIETARY: return "COREAVI_PROPRIETARY";
+        case VK_DRIVER_ID_JUICE_PROPRIETARY: return "JUICE_PROPRIETARY";
+        case VK_DRIVER_ID_VERISILICON_PROPRIETARY: return "VERISILICON_PROPRIETARY";
+        case VK_DRIVER_ID_MESA_TURNIP: return "MESA_TURNIP";
+        case VK_DRIVER_ID_MESA_V3DV: return "MESA_V3DV";
+        case VK_DRIVER_ID_MESA_PANVK: return "MESA_PANVK";
+        case VK_DRIVER_ID_SAMSUNG_PROPRIETARY: return "SAMSUNG_PROPRIETARY";
+        case VK_DRIVER_ID_MESA_VENUS: return "MESA_VENUS";
+        case VK_DRIVER_ID_MESA_DOZEN: return "MESA_DOZEN";
+        case VK_DRIVER_ID_MESA_NVK: return "MESA_NVK";
+        case VK_DRIVER_ID_IMAGINATION_OPEN_SOURCE_MESA: return "IMAGINATION_OPEN_SOURCE_MESA";
+        case VK_DRIVER_ID_MESA_HONEYKRISP: return "MESA_HONEYKRISP";
+        case VK_DRIVER_ID_VULKAN_SC_EMULATION_ON_VULKAN: return "VULKAN_SC_EMULATION_ON_VULKAN";
+        case VK_DRIVER_ID_MESA_KOSMICKRISP: return "MESA_KOSMICKRISP";
+        default: return "<unknown VkDriverId>";
+    }
+}
 
 #define kVendorID_AMD 0x1002
 #define kVendorID_Apple 0x106b
@@ -8331,44 +8363,44 @@ void wgpuAdapterGetFeatures(WGPUAdapter adapter, WGPUSupportedFeatures* features
 }
 WGPUStatus wgpuAdapterGetInfo(WGPUAdapter adapter, WGPUAdapterInfo* info) {
     ENTRY();
-    if (!adapter || !info) {
+
+    if (adapter == NULL || info == NULL || adapter->physicalDevice == VK_NULL_HANDLE) {
         EXIT();
         return WGPUStatus_Error;
     }
-    
-    // Query Vulkan for the physical device properties.
-    if (adapter == NULL || info == NULL || adapter->physicalDevice == VK_NULL_HANDLE) {
-        return WGPUStatus_Error;
-    }
-    VkPhysicalDeviceSubgroupProperties subgroupProperties = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES,
+    VkPhysicalDeviceDriverProperties driverProps = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES,
         .pNext = NULL
     };
-    VkPhysicalDeviceProperties2KHR deviceProperties2 = {
+    VkPhysicalDeviceSubgroupProperties subgroupProperties = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES,
+        .pNext = &driverProps
+    };
+    VkPhysicalDeviceProperties2KHR deviceProperties = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
         .pNext = &subgroupProperties
     };
 
-    vkGetPhysicalDeviceProperties2(adapter->physicalDevice, &deviceProperties2);
+    vkGetPhysicalDeviceProperties2(adapter->physicalDevice, &deviceProperties);
 
-    strncpy(adapter->cachedDeviceName, deviceProperties2.properties.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
+    strncpy(adapter->cachedDeviceName, deviceProperties.properties.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     adapter->cachedDeviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE - 1] = '\0';
-    
-    VkPhysicalDeviceProperties props = {0};
-    vkGetPhysicalDeviceProperties(adapter->physicalDevice, &props);
 
-    info->vendorID = props.vendorID;
-    info->deviceID = props.deviceID;
-    printf("vendorID: %d, deviceID: %d\n", props.vendorID, props.deviceID);
+    info->vendorID = deviceProperties.properties.vendorID;
+    info->deviceID = deviceProperties.properties.deviceID;
+    info->subgroupMinSize = subgroupProperties.subgroupSize;
+    info->subgroupMaxSize = subgroupProperties.subgroupSize;
+    info->backendType = WGPUBackendType_Vulkan;
+
+    printf("vendorID: %d, deviceID: %d\n", deviceProperties.properties.vendorID, deviceProperties.properties.deviceID);
     info->device = (WGPUStringView){adapter->cachedDeviceName, WGPU_STRLEN};
     info->description = (WGPUStringView){adapter->cachedDeviceDescription, WGPU_STRLEN};
     info->architecture = (WGPUStringView){
         .length = WGPU_STRLEN,
-        .data = PhysicalDeviceArchitecture_ToString(GetArchitecture(props.vendorID, props.deviceID)),
+        .data = PhysicalDeviceArchitecture_ToString(GetArchitecture(deviceProperties.properties.vendorID, deviceProperties.properties.deviceID)),
     };
 
-    // Map the Vulkan device type to the corresponding WGPU adapter type.
-    switch (props.deviceType) {
+    switch (deviceProperties.properties.deviceType) {
         case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: info->adapterType = WGPUAdapterType_IntegratedGPU; break;
         case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   info->adapterType = WGPUAdapterType_DiscreteGPU;   break;
         case VK_PHYSICAL_DEVICE_TYPE_CPU:            info->adapterType = WGPUAdapterType_CPU;           break;
