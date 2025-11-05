@@ -2142,12 +2142,44 @@ typedef struct WGPUInstanceImpl{
 }WGPUInstanceImpl;
 
 
+typedef struct VulkanDeviceInfo {
+    struct {
+        VkPhysicalDeviceFeatures2 features;
+        VkPhysicalDeviceShaderFloat16Int8FeaturesKHR shaderFloat16Int8Features;
+        VkPhysicalDevice16BitStorageFeaturesKHR _16BitStorageFeatures;
+        VkPhysicalDeviceSubgroupSizeControlFeaturesEXT subgroupSizeControlFeatures;
+        VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeaturesKHR zeroInitializeWorkgroupMemoryFeatures;
+        VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT demoteToHelperInvocationFeatures;
+        VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR shaderIntegerDotProductFeatures;
+        VkPhysicalDeviceDepthClipEnableFeaturesEXT depthClipEnableFeatures;
+        VkPhysicalDeviceRobustness2FeaturesEXT robustness2Features;
+        VkPhysicalDeviceSamplerYcbcrConversionFeatures samplerYCbCrConversionFeatures;
+        VkPhysicalDeviceShaderSubgroupExtendedTypesFeaturesKHR shaderSubgroupExtendedTypes;
+        VkPhysicalDeviceVulkanMemoryModelFeatures vulkanMemoryModelFeatures;
+        VkPhysicalDeviceCooperativeMatrixFeaturesKHR cooperativeMatrixFeatures;
+        VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures;
+        VkPhysicalDevicePipelineRobustnessFeatures pipelineRobustnessFeatures;
+    } knobs;
+
+    VkPhysicalDeviceProperties2 properties;
+    VkPhysicalDeviceMaintenance3Properties propertiesMaintenance3;
+    VkPhysicalDeviceDriverProperties driverProperties;
+    VkPhysicalDeviceSubgroupSizeControlPropertiesEXT subgroupSizeControlProperties;
+    VkPhysicalDeviceShaderIntegerDotProductPropertiesKHR shaderIntegerDotProductProperties;
+    VkPhysicalDeviceMaintenance4Properties propertiesMaintenance4;
+    VkPhysicalDeviceSubgroupProperties subgroupProperties;
+    VkPhysicalDeviceExternalMemoryHostPropertiesEXT externalMemoryHostProperties;
+    VkPhysicalDeviceCooperativeMatrixPropertiesKHR cooperativeMatrixProperties;
+    VkPhysicalDeviceDescriptorIndexingProperties descriptorIndexingProperties;
+    VkPhysicalDevicePipelineRobustnessProperties pipelineRobustnessProperties;
+    VkPhysicalDeviceMaintenance5Properties propertiesMaintenance5;
+}VulkanDeviceInfo;
+
 
 typedef struct WGPUAdapterImpl{
     VkPhysicalDevice physicalDevice;
     refcount_type refCount;
-    char cachedDeviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
-    char cachedDeviceVendor[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
+    VulkanDeviceInfo deviceInfoCache;
     char cachedDeviceDescription[512];
     WGPUInstance instance;
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingPipelineProperties;

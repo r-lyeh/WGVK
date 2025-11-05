@@ -691,95 +691,58 @@ char* sw_sprintf(const char* format, ...) {
 WGPUStatus wgpuDeviceGetAdapterInfo(WGPUDevice device, WGPUAdapterInfo* adapterInfo) WGPU_FUNCTION_ATTRIBUTE {
     ENTRY();
     if (device == NULL || adapterInfo == NULL || device->adapter == NULL || device->adapter->physicalDevice == VK_NULL_HANDLE) {
+        EXIT();
         return WGPUStatus_Error;
     }
-    VkPhysicalDeviceSubgroupProperties subgroupProperties = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES,
-        .pNext = NULL
-    };
-    VkPhysicalDeviceProperties2KHR deviceProperties2 = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &subgroupProperties
-    };
-
-    vkGetPhysicalDeviceProperties2(device->adapter->physicalDevice, &deviceProperties2);
-
-    strncpy(device->adapter->cachedDeviceName, deviceProperties2.properties.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
-    device->adapter->cachedDeviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE - 1] = '\0';
-    
-
-    // Set the WGPUStringView to point to the stable, cached string.
-    uint32_t len = strlen(device->adapter->cachedDeviceName);
-    adapterInfo->device = (WGPUStringView){device->adapter->cachedDeviceName, len};
-
-    // Populate other fields
-    adapterInfo->deviceID = deviceProperties2.properties.deviceID;
-
-    adapterInfo->subgroupMinSize = subgroupProperties.subgroupSize;
-    adapterInfo->subgroupMaxSize = subgroupProperties.subgroupSize;
-
-    // 5. Return success
-    return WGPUStatus_Success;
     EXIT();
+    return wgpuAdapterGetInfo(device->adapter, adapterInfo);
 }
 #ifndef MIN
     #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #endif
 WGPUStatus wgpuAdapterGetLimits(WGPUAdapter adapter, WGPULimits* limits) WGPU_FUNCTION_ATTRIBUTE{
     ENTRY();
-    VkPhysicalDeviceSubgroupProperties subgroupProperties = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES
-    };
+    const VkPhysicalDeviceProperties2* deviceProperties2 = &adapter->deviceInfoCache.properties;
+
+    limits->maxTextureDimension1D = deviceProperties2->properties.limits.maxImageDimension1D;
+    limits->maxTextureDimension2D = deviceProperties2->properties.limits.maxImageDimension2D;
+    limits->maxTextureDimension3D = deviceProperties2->properties.limits.maxImageDimension3D;
+    limits->maxTextureArrayLayers = deviceProperties2->properties.limits.maxImageArrayLayers;
+    limits->maxBindGroups = deviceProperties2->properties.limits.maxBoundDescriptorSets;
+    limits->maxBindGroupsPlusVertexBuffers = deviceProperties2->properties.limits.maxBoundDescriptorSets + deviceProperties2->properties.limits.maxVertexInputBindings;
+    limits->maxBindingsPerBindGroup = deviceProperties2->properties.limits.maxDescriptorSetStorageBuffers;
+    limits->maxDynamicUniformBuffersPerPipelineLayout = deviceProperties2->properties.limits.maxDescriptorSetUniformBuffersDynamic;
+    limits->maxDynamicStorageBuffersPerPipelineLayout = deviceProperties2->properties.limits.maxDescriptorSetStorageBuffersDynamic;
+    limits->maxSampledTexturesPerShaderStage = deviceProperties2->properties.limits.maxPerStageDescriptorSampledImages;
+    limits->maxSamplersPerShaderStage = deviceProperties2->properties.limits.maxPerStageDescriptorSamplers;
+    limits->maxStorageBuffersPerShaderStage = deviceProperties2->properties.limits.maxPerStageDescriptorStorageBuffers;
+    limits->maxStorageTexturesPerShaderStage = deviceProperties2->properties.limits.maxPerStageDescriptorStorageImages;
+    limits->maxUniformBuffersPerShaderStage = deviceProperties2->properties.limits.maxPerStageDescriptorUniformBuffers;
+    limits->maxUniformBufferBindingSize = deviceProperties2->properties.limits.maxUniformBufferRange;
+    limits->maxStorageBufferBindingSize = deviceProperties2->properties.limits.maxStorageBufferRange;
+    limits->minUniformBufferOffsetAlignment = deviceProperties2->properties.limits.minUniformBufferOffsetAlignment;
+    limits->minStorageBufferOffsetAlignment = deviceProperties2->properties.limits.minStorageBufferOffsetAlignment;
+    limits->maxVertexBuffers = deviceProperties2->properties.limits.maxVertexInputBindings;
+    limits->maxBufferSize = deviceProperties2->properties.limits.maxMemoryAllocationCount; // This is a weak mapping, ideally there's a buffer size limit.
+    limits->maxVertexAttributes = deviceProperties2->properties.limits.maxVertexInputAttributes;
+    limits->maxVertexBufferArrayStride = deviceProperties2->properties.limits.maxVertexInputBindingStride;
+    limits->maxInterStageShaderVariables = deviceProperties2->properties.limits.maxFragmentInputComponents; // Assuming this maps to inter-stage variables.
+    limits->maxColorAttachments = deviceProperties2->properties.limits.maxColorAttachments;
+
+    limits->maxComputeWorkgroupStorageSize = deviceProperties2->properties.limits.maxComputeSharedMemorySize;
+    limits->maxComputeInvocationsPerWorkgroup = deviceProperties2->properties.limits.maxComputeWorkGroupInvocations;
+    limits->maxComputeWorkgroupSizeX = deviceProperties2->properties.limits.maxComputeWorkGroupSize[0];
+    limits->maxComputeWorkgroupSizeY = deviceProperties2->properties.limits.maxComputeWorkGroupSize[1];
+    limits->maxComputeWorkgroupSizeZ = deviceProperties2->properties.limits.maxComputeWorkGroupSize[2];
+    limits->maxComputeWorkgroupsPerDimension = MIN(deviceProperties2->properties.limits.maxComputeWorkGroupCount[0], MIN(deviceProperties2->properties.limits.maxComputeWorkGroupCount[1], deviceProperties2->properties.limits.maxComputeWorkGroupCount[2]));
     
-    VkPhysicalDeviceProperties2KHR deviceProperties2 = {
-        .sType      = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext      = &subgroupProperties,
-    };
+    limits->maxStorageBuffersInVertexStage = deviceProperties2->properties.limits.maxPerStageDescriptorStorageBuffers;
+    limits->maxStorageTexturesInVertexStage = deviceProperties2->properties.limits.maxPerStageDescriptorStorageImages;
+    limits->maxStorageBuffersInFragmentStage = deviceProperties2->properties.limits.maxPerStageDescriptorStorageBuffers;
+    limits->maxStorageTexturesInFragmentStage = deviceProperties2->properties.limits.maxPerStageDescriptorStorageImages;
 
-    vkGetPhysicalDeviceProperties2(adapter->physicalDevice, &deviceProperties2);
-
-    // Map Vulkan limits to WGPULimits
-    limits->maxTextureDimension1D = deviceProperties2.properties.limits.maxImageDimension1D;
-    limits->maxTextureDimension2D = deviceProperties2.properties.limits.maxImageDimension2D;
-    limits->maxTextureDimension3D = deviceProperties2.properties.limits.maxImageDimension3D;
-    limits->maxTextureArrayLayers = deviceProperties2.properties.limits.maxImageArrayLayers;
-    limits->maxBindGroups = deviceProperties2.properties.limits.maxBoundDescriptorSets;
-    limits->maxBindGroupsPlusVertexBuffers = deviceProperties2.properties.limits.maxBoundDescriptorSets + deviceProperties2.properties.limits.maxVertexInputBindings;
-    limits->maxBindingsPerBindGroup = deviceProperties2.properties.limits.maxDescriptorSetStorageBuffers;
-    limits->maxDynamicUniformBuffersPerPipelineLayout = deviceProperties2.properties.limits.maxDescriptorSetUniformBuffersDynamic;
-    limits->maxDynamicStorageBuffersPerPipelineLayout = deviceProperties2.properties.limits.maxDescriptorSetStorageBuffersDynamic;
-    limits->maxSampledTexturesPerShaderStage = deviceProperties2.properties.limits.maxPerStageDescriptorSampledImages;
-    limits->maxSamplersPerShaderStage = deviceProperties2.properties.limits.maxPerStageDescriptorSamplers;
-    limits->maxStorageBuffersPerShaderStage = deviceProperties2.properties.limits.maxPerStageDescriptorStorageBuffers;
-    limits->maxStorageTexturesPerShaderStage = deviceProperties2.properties.limits.maxPerStageDescriptorStorageImages;
-    limits->maxUniformBuffersPerShaderStage = deviceProperties2.properties.limits.maxPerStageDescriptorUniformBuffers;
-    limits->maxUniformBufferBindingSize = deviceProperties2.properties.limits.maxUniformBufferRange;
-    limits->maxStorageBufferBindingSize = deviceProperties2.properties.limits.maxStorageBufferRange;
-    limits->minUniformBufferOffsetAlignment = deviceProperties2.properties.limits.minUniformBufferOffsetAlignment;
-    limits->minStorageBufferOffsetAlignment = deviceProperties2.properties.limits.minStorageBufferOffsetAlignment;
-    limits->maxVertexBuffers = deviceProperties2.properties.limits.maxVertexInputBindings;
-    limits->maxBufferSize = deviceProperties2.properties.limits.maxMemoryAllocationCount; // This is a weak mapping, ideally there's a buffer size limit.
-    limits->maxVertexAttributes = deviceProperties2.properties.limits.maxVertexInputAttributes;
-    limits->maxVertexBufferArrayStride = deviceProperties2.properties.limits.maxVertexInputBindingStride;
-    limits->maxInterStageShaderVariables = deviceProperties2.properties.limits.maxFragmentInputComponents; // Assuming this maps to inter-stage variables.
-    limits->maxColorAttachments = deviceProperties2.properties.limits.maxColorAttachments;
-
-    limits->maxComputeWorkgroupStorageSize = deviceProperties2.properties.limits.maxComputeSharedMemorySize;
-    limits->maxComputeInvocationsPerWorkgroup = deviceProperties2.properties.limits.maxComputeWorkGroupInvocations;
-    limits->maxComputeWorkgroupSizeX = deviceProperties2.properties.limits.maxComputeWorkGroupSize[0];
-    limits->maxComputeWorkgroupSizeY = deviceProperties2.properties.limits.maxComputeWorkGroupSize[1];
-    limits->maxComputeWorkgroupSizeZ = deviceProperties2.properties.limits.maxComputeWorkGroupSize[2];
-    limits->maxComputeWorkgroupsPerDimension = MIN(deviceProperties2.properties.limits.maxComputeWorkGroupCount[0],
-                                                 MIN(deviceProperties2.properties.limits.maxComputeWorkGroupCount[1],
-                                                     deviceProperties2.properties.limits.maxComputeWorkGroupCount[2]));
-    
-    limits->maxStorageBuffersInVertexStage = deviceProperties2.properties.limits.maxPerStageDescriptorStorageBuffers;
-    limits->maxStorageTexturesInVertexStage = deviceProperties2.properties.limits.maxPerStageDescriptorStorageImages;
-    limits->maxStorageBuffersInFragmentStage = deviceProperties2.properties.limits.maxPerStageDescriptorStorageBuffers;
-    limits->maxStorageTexturesInFragmentStage = deviceProperties2.properties.limits.maxPerStageDescriptorStorageImages;
-
-    return WGPUStatus_Success;
     EXIT();
+    return WGPUStatus_Success;
 }
 typedef struct FenceInFrameCacheCallbackUserdata{
     WGPUFence fence;
@@ -2082,6 +2045,69 @@ void wgpuCreateAdapter_sync(void* userdata_v){
     }
     RL_FREE((void*)pds);
     RL_FREE((void*)props);
+    adapter->deviceInfoCache = (VulkanDeviceInfo){0};
+    
+    VulkanDeviceInfo* infoCache = &adapter->deviceInfoCache;
+
+    infoCache->knobs.shaderFloat16Int8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+    infoCache->knobs.shaderFloat16Int8Features.pNext = &infoCache->knobs._16BitStorageFeatures;
+    infoCache->knobs.features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    infoCache->knobs.features.pNext = &infoCache->knobs.shaderFloat16Int8Features;
+    infoCache->knobs._16BitStorageFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
+    infoCache->knobs._16BitStorageFeatures.pNext = &infoCache->knobs.subgroupSizeControlFeatures;
+    infoCache->knobs.subgroupSizeControlFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES;
+    infoCache->knobs.subgroupSizeControlFeatures.pNext = &infoCache->knobs.zeroInitializeWorkgroupMemoryFeatures;
+    infoCache->knobs.zeroInitializeWorkgroupMemoryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ZERO_INITIALIZE_WORKGROUP_MEMORY_FEATURES;
+    infoCache->knobs.zeroInitializeWorkgroupMemoryFeatures.pNext = &infoCache->knobs.demoteToHelperInvocationFeatures;
+    infoCache->knobs.demoteToHelperInvocationFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES;
+    infoCache->knobs.demoteToHelperInvocationFeatures.pNext = &infoCache->knobs.shaderIntegerDotProductFeatures;
+    infoCache->knobs.shaderIntegerDotProductFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES;
+    infoCache->knobs.shaderIntegerDotProductFeatures.pNext = &infoCache->knobs.depthClipEnableFeatures;
+    infoCache->knobs.depthClipEnableFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT;
+    infoCache->knobs.depthClipEnableFeatures.pNext = &infoCache->knobs.robustness2Features;
+    infoCache->knobs.robustness2Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT;
+    infoCache->knobs.robustness2Features.pNext = &infoCache->knobs.samplerYCbCrConversionFeatures;
+    infoCache->knobs.samplerYCbCrConversionFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES;
+    infoCache->knobs.samplerYCbCrConversionFeatures.pNext = &infoCache->knobs.shaderSubgroupExtendedTypes;
+    infoCache->knobs.shaderSubgroupExtendedTypes.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES;
+    infoCache->knobs.shaderSubgroupExtendedTypes.pNext = &infoCache->knobs.vulkanMemoryModelFeatures;
+    infoCache->knobs.vulkanMemoryModelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
+    infoCache->knobs.vulkanMemoryModelFeatures.pNext = &infoCache->knobs.cooperativeMatrixFeatures;
+    infoCache->knobs.cooperativeMatrixFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR;
+    infoCache->knobs.cooperativeMatrixFeatures.pNext = &infoCache->knobs.descriptorIndexingFeatures;
+    infoCache->knobs.descriptorIndexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+    infoCache->knobs.descriptorIndexingFeatures.pNext = &infoCache->knobs.pipelineRobustnessFeatures;
+    infoCache->knobs.pipelineRobustnessFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES_EXT;
+    infoCache->knobs.pipelineRobustnessFeatures.pNext = NULL;
+
+    infoCache->properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    infoCache->properties.pNext = &infoCache->propertiesMaintenance3;
+    infoCache->propertiesMaintenance3.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES;
+    infoCache->propertiesMaintenance3.pNext = &infoCache->driverProperties;
+    infoCache->driverProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+    infoCache->driverProperties.pNext = &infoCache->subgroupSizeControlProperties;
+    infoCache->subgroupSizeControlProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES;
+    infoCache->subgroupSizeControlProperties.pNext = &infoCache->shaderIntegerDotProductProperties;
+    infoCache->shaderIntegerDotProductProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES;
+    infoCache->shaderIntegerDotProductProperties.pNext = &infoCache->propertiesMaintenance4;
+    infoCache->propertiesMaintenance4.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES;
+    infoCache->propertiesMaintenance4.pNext = &infoCache->subgroupProperties;
+    infoCache->subgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    infoCache->subgroupProperties.pNext = &infoCache->externalMemoryHostProperties;
+    infoCache->externalMemoryHostProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT;
+    infoCache->externalMemoryHostProperties.pNext = &infoCache->cooperativeMatrixProperties;
+    infoCache->cooperativeMatrixProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
+    infoCache->cooperativeMatrixProperties.pNext = &infoCache->descriptorIndexingProperties;
+    infoCache->descriptorIndexingProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
+    infoCache->descriptorIndexingProperties.pNext = &infoCache->pipelineRobustnessProperties;
+    infoCache->pipelineRobustnessProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_PROPERTIES_EXT;
+    infoCache->pipelineRobustnessProperties.pNext = &infoCache->propertiesMaintenance5;
+    infoCache->propertiesMaintenance5.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_PROPERTIES_KHR;
+    infoCache->propertiesMaintenance5.pNext = NULL;
+
+    vkGetPhysicalDeviceProperties2(adapter->physicalDevice, &infoCache->properties);
+    vkGetPhysicalDeviceFeatures2(adapter->physicalDevice, &infoCache->knobs.features);
+
     userdata->info.callback(WGPURequestAdapterStatus_Success, adapter, CLITERAL(WGPUStringView){NULL, 0}, userdata->info.userdata1, userdata->info.userdata2);
     EXIT();
 }
@@ -8361,6 +8387,7 @@ void wgpuAdapterGetFeatures(WGPUAdapter adapter, WGPUSupportedFeatures* features
     memcpy((void*)features->features, supported_features, count * sizeof(WGPUFeatureName));
     EXIT();
 }
+
 WGPUStatus wgpuAdapterGetInfo(WGPUAdapter adapter, WGPUAdapterInfo* info) {
     ENTRY();
 
@@ -8368,39 +8395,31 @@ WGPUStatus wgpuAdapterGetInfo(WGPUAdapter adapter, WGPUAdapterInfo* info) {
         EXIT();
         return WGPUStatus_Error;
     }
-    VkPhysicalDeviceDriverProperties driverProps = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES,
-        .pNext = NULL
+    if (adapter == NULL || info == NULL || adapter->physicalDevice == VK_NULL_HANDLE) {
+        return WGPUStatus_Error;
+    }
+
+    const VkPhysicalDeviceProperties*       deviceProps = &adapter->deviceInfoCache.properties.properties;
+    const VkPhysicalDeviceDriverProperties* driverProps = &adapter->deviceInfoCache.driverProperties;
+
+    info->vendorID = adapter->deviceInfoCache.properties.properties.vendorID;
+    info->deviceID = adapter->deviceInfoCache.properties.properties.deviceID;
+
+    info->device = (WGPUStringView){
+        adapter->deviceInfoCache.properties.properties.deviceName,
+        WGPU_STRLEN
     };
-    VkPhysicalDeviceSubgroupProperties subgroupProperties = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES,
-        .pNext = &driverProps
+    info->description = (WGPUStringView){
+        adapter->cachedDeviceDescription,
+        WGPU_STRLEN
     };
-    VkPhysicalDeviceProperties2KHR deviceProperties = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &subgroupProperties
-    };
-
-    vkGetPhysicalDeviceProperties2(adapter->physicalDevice, &deviceProperties);
-
-    strncpy(adapter->cachedDeviceName, deviceProperties.properties.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
-    adapter->cachedDeviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE - 1] = '\0';
-
-    info->vendorID = deviceProperties.properties.vendorID;
-    info->deviceID = deviceProperties.properties.deviceID;
-    info->subgroupMinSize = subgroupProperties.subgroupSize;
-    info->subgroupMaxSize = subgroupProperties.subgroupSize;
-    info->backendType = WGPUBackendType_Vulkan;
-
-    printf("vendorID: %d, deviceID: %d\n", deviceProperties.properties.vendorID, deviceProperties.properties.deviceID);
-    info->device = (WGPUStringView){adapter->cachedDeviceName, WGPU_STRLEN};
-    info->description = (WGPUStringView){adapter->cachedDeviceDescription, WGPU_STRLEN};
     info->architecture = (WGPUStringView){
         .length = WGPU_STRLEN,
-        .data = PhysicalDeviceArchitecture_ToString(GetArchitecture(deviceProperties.properties.vendorID, deviceProperties.properties.deviceID)),
+        .data = PhysicalDeviceArchitecture_ToString(GetArchitecture(deviceProps->vendorID, deviceProps->deviceID)),
     };
 
-    switch (deviceProperties.properties.deviceType) {
+    // Map the Vulkan device type to the corresponding WGPU adapter type.
+    switch (deviceProps->deviceType) {
         case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: info->adapterType = WGPUAdapterType_IntegratedGPU; break;
         case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   info->adapterType = WGPUAdapterType_DiscreteGPU;   break;
         case VK_PHYSICAL_DEVICE_TYPE_CPU:            info->adapterType = WGPUAdapterType_CPU;           break;
