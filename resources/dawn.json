@@ -1613,7 +1613,7 @@
 
         ]
     },
-    "ray trcing pipeline" : {
+    "ray tracing pipeline" : {
         "category": "object",
         "tags": ["wgvk"],
         "methods": [
@@ -3255,6 +3255,16 @@
             {"name": "timestamp writes", "type": "pass timestamp writes", "annotation": "const*", "optional": true}
         ]
     },
+    "ray tracing pass descriptor": {
+        "category": "structure",
+        "extensible": "in",
+        "members": [
+            {"name": "label", "type": "string view", "optional": true},
+            {"name": "shader binding table", "type": "ray tracing shader binding table"},
+            {"name": "max recursion depth", "type": "uint32_t"},
+            {"name": "max payload size", "type": "uint32_t"}
+        ]
+    },
     "render pass descriptor max draw count": {
         "category": "typedef",
         "type": "render pass max draw count",
@@ -3669,6 +3679,69 @@
             }
         ]
     },
+    "ray tracing shader binding table stage descriptor": {
+        "category": "structure",
+        "extensible": "in",
+        "tags": ["wgvk"],
+        "members": [
+            {"name": "stage", "type": "shader stage"},
+            {"name": "module", "type": "shader module"}
+        ]
+    },
+    "ray tracing shader binding table group descriptor" : {
+        "category": "structure",
+        "extensible": "in",
+        "tags": ["wgvk"],
+        "members": [
+            {"name": "general index", "type": "uint32_t"},
+            {"name": "closest hit index", "type": "uint32_t"},
+            {"name": "any hit index", "type": "uint32_t"},
+            {"name": "intersection index", "type": "uint32_t"}
+        ]
+    },
+    "ray tracing state descriptor": {
+        "category": "structure",
+        "extensible": "in",
+        "tags": ["wgvk"],
+        "members" : [
+            {"name": "shader binding table", "type": "ray tracing shader binding table"},
+            {"name": "max recursion depth", "type": "uint32_t"},
+            {"name": "max payload size", "type": "uint32_t"}
+        ]
+    },
+    "ray tracing acceleration container descriptor": {
+        "category": "structure",
+        "extensible": "in",
+        "tags": ["wgvk"],
+        "members" : [
+            {"name": "usage", "type": "ray tracing acceleration container usage"},
+            {"name": "level", "type": "ray tracing acceleration container level"},
+            {"name": "geometry count", "type": "uint32_t"},
+            {"name": "instance count", "type": "uint32_t"},
+            {"name": "geometries", "type": "ray tracing acceleration geometry descriptor", "annotation": "const*"},
+            {"name": "instances", "type": "ray tracing acceleration instance descriptor", "annotation": "const*"}
+        ]
+    },
+    "ray tracing pipeline descriptor": {
+        "category": "structure",
+        "extensible": "in",
+        "tags": ["wgvk"],
+        "members" : [
+            {"name": "layout", "type": "pipeline layout"},
+            {"name": "ray tracing state", "type": "ray tracing state descriptor"}
+        ]
+    },
+    "ray tracing shader binding table descriptor": {
+        "category": "structure",
+        "extensible": "in",
+        "tags": ["wgvk"],
+        "members": [
+            {"name": "stage count", "type": "uint32_t"},
+            {"name": "stages", "type": "ray tracing shader binding table stage descriptor", "annotation": "const*"},
+            {"name": "group count", "type": "uint32_t"},
+            {"name": "groups", "type": "ray tracing shader binding table group descriptor", "annotation": "const*"}
+        ]
+    },
     "sampler descriptor": {
         "category": "structure",
         "extensible": "in",
@@ -3775,6 +3848,53 @@
             {"value": 1, "name": "vertex"},
             {"value": 2, "name": "fragment"},
             {"value": 4, "name": "compute"}
+        ]
+    },
+    "ray tracing acceleration geometry usage": {
+        "category": "bitmask",
+        "values": [
+            {"value": 1, "name": "opaque"},
+            {"value": 2, "name": "allow any hit"}
+        ]
+    },
+    "ray tracing acceleration instance usage": {
+        "category": "bitmask",
+        "values": [
+            {"value": 1, "name": "triangle cull disable"},
+            {"value": 2, "name": "triangle front counterclockwise"},
+            {"value": 4, "name": "force opaque"},
+            {"value": 8, "name": "force no opaque"}
+        ]
+    },
+    "ray tracing acceleration container usage": {
+        "category": "bitmask",
+        "values": [
+            {"value": 1, "name": "allow update"},
+            {"value": 2, "name": "prefer fast trace"},
+            {"value": 4, "name": "prefer fast build"},
+            {"value": 8, "name": "low memory"}
+        ]
+    },
+    "ray tracing acceleration geometry type" : {
+        "category": "enum",
+        "values": [
+            {"value" : 1, "name": "triangles"},
+            {"value" : 2, "name": "AABBs"}
+        ]
+    },
+    "ray tracing shader binding table group type" : {
+        "category": "enum",
+        "values": [
+            {"value" : 1, "name": "general"},
+            {"value" : 2, "name": "triangles hit group"},
+            {"value" : 3, "name": "procedural hit group"}
+        ]
+    },
+    "ray tracing acceleration container level": {
+        "category": "enum",
+        "values": [
+            {"value": 1, "name" : "bottom"},
+            {"value": 2, "name" : "top"}
         ]
     },
     "stencil operation": {
