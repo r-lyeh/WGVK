@@ -1401,7 +1401,7 @@
                 "no autolock": true,
                 "returns": "ray tracing acceleration container",
                 "args": [
-                    {"name": "descriptor", "type": "ray tracing accceleration container descriptor", "annotation": "const*"}
+                    {"name": "descriptor", "type": "ray tracing acceleration container descriptor", "annotation": "const*"}
                 ]
             },
             {
@@ -3679,6 +3679,72 @@
             }
         ]
     },
+    "transform 3D descriptor": {
+        "category": "structure",
+        "tags": ["wgvk"],
+        "extensible": "in",
+        "members": [
+            {"name": "x", "type": "float"},
+            {"name": "y", "type": "float"},
+            {"name": "z", "type": "float"}
+        ]
+    },
+    "ray tracing acceleration instance transform descriptor": {
+        "category": "structure",
+        "tags": ["wgvk"],
+        "extensible": "in",
+        "members": [
+            {"name": "translation", "type": "transform 3D descriptor"},
+            {"name": "rotation", "type": "transform 3D descriptor"},
+            {"name": "scale", "type": "transform 3D descriptor"}
+        ]
+    },
+    "ray tracing acceleration geometry vertex descriptor": {
+        "category": "structure",
+        "tags": ["wgvk"],
+        "extensible": "in",
+        "members": [
+            {"name": "buffer", "type": "buffer", "optional": true},
+            {"name": "format", "type": "vertex format"},
+            {"name": "stride", "type": "uint32_t"},
+            {"name": "offset", "type": "uint32_t"},
+            {"name": "count", "type": "uint32_t"}
+        ]
+    },
+    "ray tracing acceleration geometry index descriptor": {
+        "category": "structure",
+        "tags": ["wgvk"],
+        "extensible": "in",
+        "members": [
+            {"name": "buffer", "type": "buffer", "optional": true},
+            {"name": "format", "type": "index format"},
+            {"name": "offset", "type": "uint32_t"},
+            {"name": "count", "type": "uint32_t"}
+        ]
+    },
+    "ray tracing acceleration geometry AABB descriptor": {
+        "category": "structure",
+        "tags": ["wgvk"],
+        "extensible": "in",
+        "members": [
+            {"name": "buffer", "type": "buffer", "optional": true},
+            {"name": "stride", "type": "uint32_t"},
+            {"name": "offset", "type": "uint32_t"},
+            {"name": "count", "type": "uint32_t"}
+        ]
+    },
+    "ray tracing acceleration geometry descriptor": {
+        "category": "structure",
+        "tags": ["wgvk"],
+        "extensible": "in",
+        "members": [
+            {"name": "usage", "type": "ray tracing acceleration geometry usage"},
+            {"name": "type", "type": "ray tracing acceleration geometry type"},
+            {"name": "vertex", "type": "ray tracing acceleration geometry vertex descriptor"},
+            {"name": "index", "type": "ray tracing acceleration geometry index descriptor"},
+            {"name": "aabb", "type": "ray tracing acceleration geometry AABB descriptor"}
+        ]
+    },
     "ray tracing shader binding table stage descriptor": {
         "category": "structure",
         "extensible": "in",
@@ -3707,6 +3773,29 @@
             {"name": "shader binding table", "type": "ray tracing shader binding table"},
             {"name": "max recursion depth", "type": "uint32_t"},
             {"name": "max payload size", "type": "uint32_t"}
+        ]
+    },
+
+    "transform matrix": {
+        "category": "structure",
+        "tags": ["wgvk"],
+        "extensible": "in",
+        "members": [
+            {"name": "matrix", "type": "float", "annotation": "[3][4]"}
+        ]
+    },
+    "ray tracing acceleration instance descriptor": {
+        "category": "structure",
+        "tags": ["wgvk"],
+        "extensible": "in",
+        "members": [
+            {"name": "usage", "type": "ray tracing acceleration instance usage"},
+            {"name": "mask", "type": "uint8_t"},
+            {"name": "instance ID", "type": "uint32_t"},
+            {"name": "instance offset", "type": "uint32_t"},
+            {"name": "transform", "type": "ray tracing acceleration instance transform descriptor"},
+            {"name": "transform matrix", "type": "transform matrix"},
+            {"name": "geometry container", "type": "ray tracing acceleration container"}
         ]
     },
     "ray tracing acceleration container descriptor": {
