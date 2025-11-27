@@ -96,6 +96,26 @@ target_compile_features(${WGVK_PRIMARY_TARGET_NAME} PUBLIC c_std_11)
 if(MSVC)
   target_compile_options(${WGVK_PRIMARY_TARGET_NAME} PUBLIC "/experimental:c11atomics")
 endif()
+set(NONMSVC_WARNINGS "-Wall" "-Wextra" "-Wno-unused-function" "-Wno-unused-parameter" "-Wno-missing-field-initializers")
+target_compile_options(${WGVK_PRIMARY_TARGET_NAME} PRIVATE
+  # MSVC (including clang-cl when using MSVC frontend)
+  $<$<CXX_COMPILER_ID:MSVC>:
+    /W4
+  >
+  # GCC
+  $<$<CXX_COMPILER_ID:GNU>:
+    ${NONMSVC_WARNINGS}
+  >
+  # Clang (Unix-style, not clang-cl)
+  $<$<CXX_COMPILER_ID:Clang>:
+    ${NONMSVC_WARNINGS}
+  >
+  # AppleClang (if you want to distinguish it)
+  $<$<CXX_COMPILER_ID:AppleClang>:
+    ${NONMSVC_WARNINGS}
+  >
+)
+
 
 if(WGVK_BUILD_WGSL_SUPPORT)
   
@@ -278,7 +298,9 @@ if(WGVK_BUILD_EXAMPLES)
     add_executable(basic_glsl_shader "examples/basic_glsl_shader.c")
   endif()
   add_executable(multi_submit "examples/multi_submit.c")
-  #add_executable(raytracing "examples/raytracing.c")
+  if(NOT APPLE)
+    add_executable(raytracing "examples/raytracing.c")
+  endif()
   if(WGVK_SUPPORT_DRM)
     add_executable(drm_surface "examples/drm_surface.c")
     target_link_libraries(drm_surface PUBLIC wgvk ${LIBDRM_LIBRARIES})
@@ -295,7 +317,9 @@ if(WGVK_BUILD_EXAMPLES)
     target_link_libraries(basic_wgsl_shader PUBLIC wgvk glfw)
     target_link_libraries(basic_glsl_shader PUBLIC wgvk glfw)
   endif()
-  #target_link_libraries(raytracing PUBLIC wgvk glfw)
+  if(NOT APPLE)
+    target_link_libraries(raytracing PUBLIC wgvk glfw)
+  endif()
   target_link_libraries(basic_compute PUBLIC wgvk)
   target_link_libraries(multi_submit PUBLIC wgvk)
   target_link_libraries(asynchronous_loading PUBLIC wgvk)

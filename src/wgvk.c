@@ -664,6 +664,8 @@ char* sw_sprintf(const char* format, ...) {
                         case 'p':
                             written = sprintf(temp_buf, temp_format, va_arg(args2, void*));
                             break;
+                        default: 
+                            break;
                     }
                     
                     if (written > 0) {
@@ -793,7 +795,7 @@ void PerframeCache_pushFenceDependencies(PerframeCache* pfcache, WGPUFence fence
     }
 }
 
-void FIFCache_init(FIFCache* fifCache, WGPUDevice device, uint32_t queueFamily){
+WGPUStatus FIFCache_init(FIFCache* fifCache, WGPUDevice device, uint32_t queueFamily){
     fifCache->device = device;
     VkSemaphoreCreateInfo sci = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
     VkCommandPoolCreateInfo pci = { 
@@ -805,10 +807,12 @@ void FIFCache_init(FIFCache* fifCache, WGPUDevice device, uint32_t queueFamily){
     for(uint32_t i = 0;i < framesInFlight;i++){
         VkCommandPool* pool = &fifCache->frameCaches[i].commandPool;
         VkSemaphore* fts = &fifCache->frameCaches[i].finalTransitionSemaphore;
-        VkSemaphore* ftf = &fifCache->frameCaches[i].finalTransitionSemaphore;
         VkCommandBuffer* ftb = &fifCache->frameCaches[i].finalTransitionBuffer;
         VkResult scres = device->functions.vkCreateSemaphore(device->device, &sci, NULL, fts);
         VkResult cpcres = device->functions.vkCreateCommandPool(device->device, &pci, NULL, pool);
+        if(scres != VK_SUCCESS || cpcres != VK_SUCCESS){
+            return  WGPUStatus_Error;
+        }
         const VkCommandBufferAllocateInfo cbai = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
             .commandPool = *pool,
@@ -821,10 +825,13 @@ void FIFCache_init(FIFCache* fifCache, WGPUDevice device, uint32_t queueFamily){
         VkSemaphoreVector_reserve(semvec, 100);
         semvec->size = 100;
         for(uint32_t j = 0;j < semvec->size;j++){
-            device->functions.vkCreateSemaphore(device->device, &sci, NULL, semvec->data + j);
+            if(device->functions.vkCreateSemaphore(device->device, &sci, NULL, semvec->data + j) != VK_SUCCESS){
+                return WGPUStatus_Error;
+            }
         }
         device->functions.vkCreateSemaphore(device->device, &sci, NULL, &fifCache->frameCaches[i].syncState.acquireImageSemaphore);
     }
+    return WGPUStatus_Success;
 }
 
 void SyncState_destroy(WGPUDevice device, SyncState* syncState){
@@ -1027,13 +1034,13 @@ LayoutedRenderPass LoadRenderPassFromLayout(WGPUDevice device, RenderPassLayout 
     }
 
     
-    uint32_t colorAttachmentCount = layout.colorAttachmentCount;
+    const uint32_t colorAttachmentCount = layout.colorAttachmentCount;
     
 
     // Set up color attachment references for the subpass.
     VkAttachmentReference colorRefs[MAX_COLOR_ATTACHMENTS] = {0}; // list of color attachments
     uint32_t colorIndex = 0;
-    for (uint32_t i = 0; i < layout.colorAttachmentCount; i++) {
+    for (uint32_t i = 0; i < colorAttachmentCount; i++) {
         if (!is__depthVk(layout.colorAttachments[i].format)) {
             colorRefs[colorIndex].attachment = i;
             colorRefs[colorIndex].layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -1042,10 +1049,11 @@ LayoutedRenderPass LoadRenderPassFromLayout(WGPUDevice device, RenderPassLayout 
     }
 
     // Set up subpass description.
-    VkSubpassDescription subpass zeroinit;
-    subpass.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount    = colorIndex;
-    subpass.pColorAttachments       = colorIndex ? colorRefs : NULL;
+    VkSubpassDescription subpass = {
+        .pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount    = colorIndex,
+        .pColorAttachments       = colorIndex ? colorRefs : NULL,
+    };
 
 
     // Assign depth attachment if present.
@@ -1275,7 +1283,6 @@ WGPUInstance wgpuCreateInstance(const WGPUInstanceDescriptor* descriptor) {
         if(endswith_(currentExtName, "surface") || strstr(currentExtName, "debug") != NULL || strstr(currentExtName, "swapchain_colorspace") != NULL){
             enabledExtensions[enabledExtensionCount++] = currentExtName;
         }
-        int desired = 0;
     }
     #if SUPPORT_DRM_SURFACE == 1
         enabledExtensions[enabledExtensionCount++] = "VK_KHR_display";
@@ -1306,7 +1313,7 @@ WGPUInstance wgpuCreateInstance(const WGPUInstanceDescriptor* descriptor) {
     VkLayerProperties availableLayers[64] = {0};
     uint32_t availableLayerCount = 0;
     VkResult layerEnumResult = vkEnumerateInstanceLayerProperties(&availableLayerCount, NULL);
-    if(layerEnumResult){
+    if(layerEnumResult == VK_SUCCESS){
         layerEnumResult = vkEnumerateInstanceLayerProperties(&availableLayerCount, availableLayers);
     }
     if(layerEnumResult != VK_SUCCESS){
@@ -1342,7 +1349,7 @@ WGPUInstance wgpuCreateInstance(const WGPUInstanceDescriptor* descriptor) {
                 }
                 if(found){
                     char* dest = nullTerminatedRequestedLayers[requestedAvailableLayerCount];
-                    memcpy(dest, layerName, strlen(layerName));
+                    memcpy(dest, layerName, strlen(layerName) + 1);
                     nullTerminatedRequestedLayerPointers[requestedAvailableLayerCount] = dest;
                     ++requestedAvailableLayerCount;
                 }
@@ -1640,6 +1647,7 @@ static const char* DriverID_ToString(const VkDriverId id){
 PhysicalDeviceArchitecture GetArchitecture(uint32_t vendorId, uint32_t deviceId) {
     ENTRY();
     switch(vendorId) {
+        default: return PhysicalDeviceArchitecture_Unknown;
         case kVendorID_AMD: {
             switch (deviceId & 0xFFF0) {
                 case 0x1300:
@@ -1718,6 +1726,7 @@ PhysicalDeviceArchitecture GetArchitecture(uint32_t vendorId, uint32_t deviceId)
                     return PhysicalDeviceArchitecture_AMD_RDNA4;
                 case 0x7380:
                     return PhysicalDeviceArchitecture_AMD_CDNA1;
+                default: return PhysicalDeviceArchitecture_Unknown;
             }
         } break;
         case kVendorID_ARM: {
@@ -1734,18 +1743,21 @@ PhysicalDeviceArchitecture GetArchitecture(uint32_t vendorId, uint32_t deviceId)
                 case 0xC0000000:
                 case 0xD0000000:
                     return PhysicalDeviceArchitecture_ARM_Gen5;
+                default: return PhysicalDeviceArchitecture_Unknown;
             }
         } break;
         case kVendorID_Broadcom: {
             switch (deviceId & 0x00000000) {
                 case 0x00000000:
                     return PhysicalDeviceArchitecture_Broadcom_VideoCore;
+                default: return PhysicalDeviceArchitecture_Unknown;
             }
         } break;
         case kVendorID_Google: {
             switch (deviceId) {
                 case 0xC0DE:
                     return PhysicalDeviceArchitecture_Google_Swiftshader;
+                default: return PhysicalDeviceArchitecture_Unknown;
             }
         } break;
         case kVendorID_ImgTec: {
@@ -1759,6 +1771,7 @@ PhysicalDeviceArchitecture GetArchitecture(uint32_t vendorId, uint32_t deviceId)
                 case 0x35000000:
                 case 0x36000000:
                     return PhysicalDeviceArchitecture_ImgTec_Albiorix;
+                default: return PhysicalDeviceArchitecture_Unknown;
             }
         } break;
         case kVendorID_Intel: {
@@ -1802,18 +1815,21 @@ PhysicalDeviceArchitecture GetArchitecture(uint32_t vendorId, uint32_t deviceId)
                     return PhysicalDeviceArchitecture_Intel_Xe2HPG;
                 case 0xB000:
                     return PhysicalDeviceArchitecture_Intel_Xe3LPG;
+                default: return PhysicalDeviceArchitecture_Unknown;
             }
         } break;
         case kVendorID_Mesa: {
             switch (deviceId) {
                 case 0x0000:
                     return PhysicalDeviceArchitecture_Mesa_Software;
+                default: return PhysicalDeviceArchitecture_Unknown;
             }
         } break;
         case kVendorID_Microsoft: {
             switch (deviceId) {
                 case 0x8c:
                     return PhysicalDeviceArchitecture_Microsoft_WARP;
+                default: return PhysicalDeviceArchitecture_Unknown;
             }
         } break;
         case kVendorID_Nvidia: {
@@ -1853,6 +1869,7 @@ PhysicalDeviceArchitecture GetArchitecture(uint32_t vendorId, uint32_t deviceId)
                 case 0x2d00:
                 case 0x2f00:
                     return PhysicalDeviceArchitecture_Nvidia_Blackwell;
+                default: return PhysicalDeviceArchitecture_Unknown;
             }
             switch (deviceId & 0xFF000000) {
                 case 0x1e000000:
@@ -1865,6 +1882,7 @@ PhysicalDeviceArchitecture GetArchitecture(uint32_t vendorId, uint32_t deviceId)
                     return PhysicalDeviceArchitecture_Nvidia_Ampere;
                 case 0xa5000000:
                     return PhysicalDeviceArchitecture_Nvidia_Volta;
+                default: return PhysicalDeviceArchitecture_Unknown;
             }
         } break;
         case kVendorID_QualcommPCI: {
@@ -1882,6 +1900,7 @@ PhysicalDeviceArchitecture GetArchitecture(uint32_t vendorId, uint32_t deviceId)
                     return PhysicalDeviceArchitecture_QualcommPCI_Adreno7xx;
                 case 0x44000000:
                     return PhysicalDeviceArchitecture_QualcommPCI_Adreno8xx;
+                default: return PhysicalDeviceArchitecture_Unknown;
             }
         } break;
         case kVendorID_QualcommACPI: {
@@ -1894,6 +1913,7 @@ PhysicalDeviceArchitecture GetArchitecture(uint32_t vendorId, uint32_t deviceId)
                 case 0x37314400:
                 case 0x36334300:
                     return PhysicalDeviceArchitecture_QualcommACPI_Adreno7xx;
+                default: return PhysicalDeviceArchitecture_Unknown;
             }
         } break;
         case kVendorID_Samsung: {
@@ -1903,10 +1923,12 @@ PhysicalDeviceArchitecture GetArchitecture(uint32_t vendorId, uint32_t deviceId)
                     return PhysicalDeviceArchitecture_Samsung_RDNA2;
                 case 0x02600200:
                     return PhysicalDeviceArchitecture_Samsung_RDNA3;
+                default: return PhysicalDeviceArchitecture_Unknown;
             }
         } break;
         case kVendorID_Huawei: {
             switch (deviceId & 0xFFFFFFFF) {
+                default: return PhysicalDeviceArchitecture_Unknown;
             }
         } break;
     }
@@ -1948,7 +1970,7 @@ void wgpuCreateAdapter_sync(void* userdata_v){
         
         if(i >= physicalDeviceCount) {
             // No CPU device found - forceFallbackAdapter requires one
-            RL_FREE(pds);
+            RL_FREE((void*)pds);
             const char res[] = "forceFallbackAdapter requested but no CPU device available";
             userdata->info.callback(
                 WGPURequestAdapterStatus_Unavailable,
@@ -1989,7 +2011,7 @@ void wgpuCreateAdapter_sync(void* userdata_v){
         
         // If nothing matched, fail
         if(i >= physicalDeviceCount) {
-            RL_FREE(pds);
+            RL_FREE((void*)pds);
             const char res[] = "No suitable adapter found matching power preference";
             userdata->info.callback(
                 WGPURequestAdapterStatus_Unavailable,
@@ -2323,10 +2345,6 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     WGPUQueue retQueue = RL_CALLOC(1, sizeof(WGPUQueueImpl));
     retQueue->refCount = 0;
     VkResult dcresult = vkCreateDevice(adapter->physicalDevice, &createInfo, NULL, &(retDevice->device));
-    
-
-
-    struct VolkDeviceTable table = {0};
 
     if (dcresult != VK_SUCCESS) {
         TRACELOG(WGPU_LOG_FATAL, "vkCreateDevice failed: %s", vkErrorString(dcresult));
@@ -2389,21 +2407,15 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
             break;
         }
     }
+    
+    #if USE_VMA_ALLOCATOR == 1
+    
     const VmaPoolCreateInfo vpci = {
         .minAllocationAlignment = 64,
         .memoryTypeIndex = hostVisibleCoherentIndex,
         .blockSize = (1 << 16)
     };
-    #if USE_VMA_ALLOCATOR == 1
-    VmaDeviceMemoryCallbacks callbacks = {
-        0
-        //.pfnAllocate = [](VmaAllocator allocator, uint32_t type, VkDeviceMemory, VkDeviceSize size, void * _Nullable){
-        //    TRACELOG(WGPU_LOG_WARNING, "Allocating %llu of memory type %u", size, type);
-        //},
-        //.pfnFree = [](VmaAllocator allocator, uint32_t type, VkDeviceMemory, VkDeviceSize size, void * _Nullable){
-        //    TRACELOG(WGPU_LOG_WARNING, "Freeing %llu of memory type %u", size, type);
-        //}
-    };
+    VmaDeviceMemoryCallbacks callbacks = {0};
     VmaVulkanFunctions vmaVulkanFunctions = {0};
     VmaAllocatorCreateInfo aci = {
         .instance = adapter->instance->instance,
@@ -2427,11 +2439,8 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     #endif
     retDevice->thread_pool = wgvk_thread_pool_create(4);
     wgvkAllocator_init(&retDevice->builtinAllocator, adapter->physicalDevice, retDevice, &retDevice->functions);
-    {
-
-        //auto [device, queue] = ret;
+    {;
         retDevice->queue = retQueue;
-
         retDevice->adapter = adapter;
         wgpuAdapterAddRef(adapter);
         retDevice->adapter = adapter;
@@ -3225,7 +3234,7 @@ WGPUBindGroup wgpuDeviceCreateBindGroup(WGPUDevice device, const WGPUBindGroupDe
             const uint32_t contiguousIndex = descriptorTypeContiguous(vkdt);
             ++counts[contiguousIndex];
         }
-        VkDescriptorPoolSize sizes[DESCRIPTOR_TYPE_UPPER_LIMIT];
+        VkDescriptorPoolSize sizes[DESCRIPTOR_TYPE_UPPER_LIMIT] = {0};
         uint32_t VkDescriptorPoolSizeCount = 0;
         for(uint32_t i = 0;i < DESCRIPTOR_TYPE_UPPER_LIMIT;i++){
             if(counts[i] != 0){
@@ -4464,19 +4473,19 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
             const VkStridedDeviceAddressRegionKHR raygenSbtRegion = {
                 .deviceAddress = sbtBaseAddress + traceRays->rayGenerationOffset * handleStride,
                 .stride        = handleStride,
-                .size          = 32
+                .size          = handleStride
             };
         
             const VkStridedDeviceAddressRegionKHR missSbtRegion = {
                 .deviceAddress = sbtBaseAddress + traceRays->rayMissOffset * handleStride,
                 .stride        = handleStride,
-                .size          = 32
+                .size          = handleStride
             };
         
             const VkStridedDeviceAddressRegionKHR hitSbtRegion = {
                 .deviceAddress = sbtBaseAddress + traceRays->rayHitOffset * handleStride,
                 .stride        = handleStride,
-                .size          = 32
+                .size          = handleStride
             };
             
             const VkStridedDeviceAddressRegionKHR callableSbtRegion = { .deviceAddress = 0, .stride = 0, .size = 0 };
@@ -10517,15 +10526,16 @@ WGPURayTracingShaderBindingTable wgpuDeviceCreateRayTracingShaderBindingTable(WG
             .anyHitShader = group_i->anyHitIndex,
             .intersectionShader = group_i->intersectionIndex,
         };
-        if(vkShaderGroupType == VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR){
-            insert.intersectionShader = VK_SHADER_UNUSED_KHR;
-            insert.anyHitShader = VK_SHADER_UNUSED_KHR;
-        }
-        else if(vkShaderGroupType == VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR){
-            insert.anyHitShader = VK_SHADER_UNUSED_KHR;
-            insert.closestHitShader = VK_SHADER_UNUSED_KHR;
-            insert.intersectionShader = VK_SHADER_UNUSED_KHR;
-        }
+
+        //if(vkShaderGroupType == VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR){
+        //    insert.intersectionShader = VK_SHADER_UNUSED_KHR;
+        //    insert.anyHitShader = VK_SHADER_UNUSED_KHR;
+        //}
+        //else if(vkShaderGroupType == VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR){
+        //    insert.anyHitShader = VK_SHADER_UNUSED_KHR;
+        //    insert.closestHitShader = VK_SHADER_UNUSED_KHR;
+        //    insert.intersectionShader = VK_SHADER_UNUSED_KHR;
+        //}
 
         ret->shaderGroups[i] = insert;
     }
@@ -10544,13 +10554,20 @@ WGPURayTracingShaderBindingTable wgpuDeviceCreateRayTracingShaderBindingTable(WG
     EXIT();
 }
 
+static inline uint32_t roundup_to_multiple(uint32_t x, uint32_t multipleOf){
+    if(multipleOf == 0){
+        return x;
+    }
+    return (x + multipleOf - 1) & ~(multipleOf - 1);
+}
+
 WGPURaytracingPipeline wgpuDeviceCreateRayTracingPipeline(WGPUDevice device, const WGPURayTracingPipelineDescriptor* descriptor){
     ENTRY();
-    // After creating the ray tracing pipeline in wgpuDeviceCreateRayTracingPipeline:
     WGPURaytracingPipeline ret = RL_CALLOC(1, sizeof(WGPURaytracingPipelineImpl));
     ret->layout = descriptor->layout;
     wgpuPipelineLayoutAddRef(ret->layout);
-    VkRayTracingPipelineCreateInfoKHR createInfo = {
+
+    const VkRayTracingPipelineCreateInfoKHR createInfo = {
         .sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
         .maxPipelineRayRecursionDepth = descriptor->rayTracingState.maxRecursionDepth,
         .layout = descriptor->layout->layout,
@@ -10559,50 +10576,62 @@ WGPURaytracingPipeline wgpuDeviceCreateRayTracingPipeline(WGPUDevice device, con
         .stageCount = descriptor->rayTracingState.shaderBindingTable->shaderStageCount,
         .pStages    = descriptor->rayTracingState.shaderBindingTable->shaderStages,
     };
-    device->functions.vkCreateRayTracingPipelinesKHR(device->device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &createInfo, NULL, &ret->raytracingPipeline);
     
+    VkResult plCreateResult = device->functions.vkCreateRayTracingPipelinesKHR(device->device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &createInfo, NULL, &ret->raytracingPipeline);
+    
+    if(plCreateResult != VK_SUCCESS){
+        RL_FREE(ret);
+        return NULL;
+    }
+
     const VkPhysicalDeviceRayTracingPipelinePropertiesKHR* rtProperties = &device->adapter->rayTracingPipelineProperties;
-    const uint32_t handleAlignment = rtProperties->shaderGroupBaseAlignment;
-    const uint32_t handleSize = device->adapter->rayTracingPipelineProperties.shaderGroupHandleSize;
+    const uint32_t handleSize = rtProperties->shaderGroupHandleSize;
+    const uint32_t baseAlignment = rtProperties->shaderGroupBaseAlignment;
     const uint32_t groupCount = descriptor->rayTracingState.shaderBindingTable->shaderGroupCount;
+    const uint32_t sbtStride = roundup_to_multiple(handleSize, baseAlignment); 
+
+    uint32_t packedSize = groupCount * handleSize;
+    uint8_t* tempPackedHandles = (uint8_t*)RL_CALLOC(1, packedSize);
     
-    // calloc groupCount * handleSize bytes
-    uint8_t* shaderHandles = (uint8_t*)RL_CALLOC(groupCount, handleSize);
-    uint64_t shaderHandlesSizeInBytes = ((uint64_t)groupCount) * handleSize;
-    // Get the handles
     VkResult result = device->functions.vkGetRayTracingShaderGroupHandlesKHR(
         device->device,
         ret->raytracingPipeline,
-        0,                      // firstGroup
-        groupCount,             // groupCount
-        shaderHandlesSizeInBytes, // dataSize
-        shaderHandles           // pData
+        0,
+        groupCount,
+        packedSize,
+        tempPackedHandles
     );
 
-    const VkDeviceSize handleStride = (handleSize + (handleAlignment - 1)) & ~(handleAlignment - 1);
-    const VkDeviceSize sbtTotalSize = groupCount * handleStride;
-    
-    // Store the total size on the pipeline object.
+    if(result != VK_SUCCESS){
+        RL_FREE(tempPackedHandles);
+        RL_FREE(ret);
+        return NULL;
+    }
+
+    VkDeviceSize sbtTotalSize = (VkDeviceSize)groupCount * sbtStride;
     ret->totalSbtSize = sbtTotalSize;
 
-    // Still in wgpuDeviceCreateRayTracingPipeline or a new function for the SBT
     WGPUBufferDescriptor sbtBufferDesc = {
-        .size = shaderHandlesSizeInBytes,
-        .usage = WGPUBufferUsage_Raytracing, // | WGPUBufferUsage_ShaderDeviceAddress
-        .mappedAtCreation = true // Or map it after creation
+        .size = sbtTotalSize,
+        .usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress | WGPUBufferUsage_CopyDst,
+        .mappedAtCreation = true 
     };
     
-    // This buffer should probably be part of your WGPURaytracingPipelineImpl
     ret->sbtBuffer = wgpuDeviceCreateBuffer(device, &sbtBufferDesc);
     
-    // Copy the handles to the mapped buffer
-    void* mappedData = wgpuBufferGetMappedRange(ret->sbtBuffer, 0, shaderHandlesSizeInBytes);
-    memcpy(mappedData, shaderHandles, shaderHandlesSizeInBytes);
+    uint8_t* mappedSbtData = (uint8_t*)wgpuBufferGetMappedRange(ret->sbtBuffer, 0, sbtTotalSize);
+    
+    for(size_t i = 0; i < groupCount; i++) {
+        uint8_t* src = tempPackedHandles + (i * (size_t)handleSize);
+        uint8_t* dst = mappedSbtData + (i * (size_t)sbtStride);
+        memcpy(dst, src, handleSize);
+    }
+
     wgpuBufferUnmap(ret->sbtBuffer);
     
-    RL_FREE(shaderHandles);
-    return ret;
+    RL_FREE(tempPackedHandles);
     EXIT();
+    return ret;
 }
 
 WGPURayTracingAccelerationContainer wgpuDeviceCreateRayTracingAccelerationContainer(WGPUDevice device, const WGPURayTracingAccelerationContainerDescriptor* descriptor){
@@ -10610,32 +10639,33 @@ WGPURayTracingAccelerationContainer wgpuDeviceCreateRayTracingAccelerationContai
     WGPURayTracingAccelerationContainer ret = RL_CALLOC(1, sizeof(WGPURayTracingAccelerationContainerImpl));
     ret->level = descriptor->level;
     ret->device = device;
-    wgpuDeviceAddRef(device);
-    uint32_t geometryCount = (descriptor->level == WGPURayTracingAccelerationContainerLevel_Bottom) ? descriptor->geometryCount : descriptor->instanceCount;
+    
+    // For BLAS, geometryCount is the number of meshes.
+    // For TLAS, geometryCount is 1 (A single geometry of type INSTANCES containing N primitives).
+    uint32_t geometryCount = (descriptor->level == WGPURayTracingAccelerationContainerLevel_Bottom) ? descriptor->geometryCount : 1;
+    
     ret->geometryCount = geometryCount;
     ret->primitiveCounts = RL_CALLOC(geometryCount, sizeof(uint32_t));
     uint32_t* maxPrimitiveCounts = ret->primitiveCounts;
-
-    VkAabbPositionsKHR dummy = {0};
-
-    VkAccelerationStructureGeometryKHR* geometries = RL_CALLOC(geometryCount + descriptor->instanceCount, sizeof(VkAccelerationStructureGeometryKHR));
-
     
-
+    // Allocate geometries and range infos based on the corrected geometryCount
+    VkAccelerationStructureGeometryKHR* geometries = RL_CALLOC(geometryCount, sizeof(VkAccelerationStructureGeometryKHR));
+    ret->buildRangeInfos = (VkAccelerationStructureBuildRangeInfoKHR*)RL_CALLOC(geometryCount, sizeof(VkAccelerationStructureBuildRangeInfoKHR));
+    
     if (descriptor->level == WGPURayTracingAccelerationContainerLevel_Bottom) {
+        ret->inputGeometryBuffers = (WGPUBuffer*)RL_CALLOC(geometryCount, sizeof(WGPUBuffer));
+
         for (uint32_t i = 0; i < geometryCount; i++) {
             geometries[i].sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-            geometries[i].flags = VK_GEOMETRY_OPAQUE_BIT_KHR; // Or dynamic based on descriptor
+            geometries[i].flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
             
-            ret->inputGeometryBuffers = RL_CALLOC(geometryCount, sizeof(WGPUBuffer));
-            ret->buildRangeInfos = RL_CALLOC(geometryCount, sizeof(VkAccelerationStructureBuildRangeInfoKHR));
             switch (descriptor->geometries[i].type) {
                 case WGPURayTracingAccelerationGeometryType_Triangles: {
-                    
                     geometries[i].geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
                     geometries[i].geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
                     geometries[i].geometry.triangles.vertexFormat = toVulkanVertexFormat(descriptor->geometries[i].vertex.format);
-                    geometries[i].geometry.triangles.vertexData.deviceAddress = descriptor->geometries[i].vertex.buffer->address;
+                    uint64_t address = descriptor->geometries[i].vertex.buffer->address;
+                    geometries[i].geometry.triangles.vertexData.deviceAddress = address;
                     geometries[i].geometry.triangles.vertexStride = descriptor->geometries[i].vertex.stride;
                     geometries[i].geometry.triangles.maxVertex = descriptor->geometries[i].vertex.count;
                     
@@ -10681,29 +10711,32 @@ WGPURayTracingAccelerationContainer wgpuDeviceCreateRayTracingAccelerationContai
         }
     }
     else if(descriptor->level == WGPURayTracingAccelerationContainerLevel_Top){
+        // Allocate host-side instance data to populate buffer
         VkAccelerationStructureInstanceKHR* vulkanInstances = RL_CALLOC(descriptor->instanceCount, sizeof(VkAccelerationStructureInstanceKHR));
-        
-        ret->buildRangeInfos = RL_CALLOC(descriptor->instanceCount, sizeof(VkAccelerationStructureBuildRangeInfoKHR));
 
         WGPUBufferDescriptor vfbDesc = {
             .size = descriptor->instanceCount * sizeof(VkAccelerationStructureInstanceKHR),
-            .usage = WGPUBufferUsage_Raytracing,
+            .usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress,
         };
 
-        WGPUBuffer vulkanFormattedBuffer = wgpuDeviceCreateBuffer(device, &vfbDesc);
-
-        for(uint32_t i = 0;i < descriptor->instanceCount;i++){
+        ret->instanceBuffer = wgpuDeviceCreateBuffer(device, &vfbDesc);
+        
+        // 1. Loop through instances to fill the buffer data
+        for(uint32_t i = 0; i < descriptor->instanceCount; i++){
             const WGPURayTracingAccelerationInstanceDescriptor* wgpuInstance = descriptor->instances + i;
             VkAccelerationStructureInstanceKHR* vulkanInstance = vulkanInstances + i;
+            
             memcpy(&vulkanInstance->transform, &wgpuInstance->transformMatrix, sizeof(VkTransformMatrixKHR));
             
             vulkanInstance->instanceCustomIndex = wgpuInstance->instanceId;
             vulkanInstance->mask = wgpuInstance->mask;
             vulkanInstance->instanceShaderBindingTableRecordOffset = wgpuInstance->instanceOffset;
             vulkanInstance->flags = 0;
+            
             if (wgpuInstance->usage & WGPURayTracingAccelerationInstanceUsage_TriangleCullDisable) {
                 vulkanInstance->flags |= VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
             }
+
             VkAccelerationStructureDeviceAddressInfoKHR getASDeviceAddressInfo = {
                 .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
                 .accelerationStructure = wgpuInstance->geometryContainer->accelerationStructure,
@@ -10711,44 +10744,53 @@ WGPURayTracingAccelerationContainer wgpuDeviceCreateRayTracingAccelerationContai
             vulkanInstance->accelerationStructureReference = device->functions.vkGetAccelerationStructureDeviceAddressKHR(device->device, &getASDeviceAddressInfo);
         }
         
-        wgpuQueueWriteBuffer(device->queue, vulkanFormattedBuffer, 0, vulkanInstances, vfbDesc.size);
-        
-        for(uint32_t i = 0;i < descriptor->instanceCount;i++){
-            geometries[i].sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-            geometries[i].geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-            geometries[i].geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-            geometries[i].geometry.instances.data.deviceAddress = vulkanFormattedBuffer->address;
-            geometries[i].geometry.instances.arrayOfPointers = VK_FALSE;
-        }
-    }
-    ret->geometries = geometries;
+        // Write the instance data to GPU memory
+        wgpuQueueWriteBuffer(device->queue, ret->instanceBuffer, 0, vulkanInstances, vfbDesc.size);
+        RL_FREE(vulkanInstances); // Clean up temp host memory
 
-    VkAccelerationStructureBuildSizesInfoKHR buildSizesInfo = {
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR,
-        0,0,0,0
-    };
+        // 2. Configure the SINGLE geometry entry for the TLAS
+        // The instance count is handled by primitiveCount, not geometryCount.
+        maxPrimitiveCounts[0] = descriptor->instanceCount;
+
+        geometries[0].sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+        geometries[0].geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+        geometries[0].geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+        geometries[0].geometry.instances.data.deviceAddress = ret->instanceBuffer->address;
+        geometries[0].geometry.instances.arrayOfPointers = VK_FALSE;
+
+        ret->buildRangeInfos[0].primitiveCount = descriptor->instanceCount; 
+        ret->buildRangeInfos[0].primitiveOffset = 0;
+        ret->buildRangeInfos[0].firstVertex = 0;
+        ret->buildRangeInfos[0].transformOffset = 0;
+    }
+    
+    ret->geometries = geometries;
 
     VkAccelerationStructureBuildGeometryInfoKHR geometryInfoVulkan = {
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
         .pGeometries = geometries,
-        .geometryCount = geometryCount,
+        .geometryCount = geometryCount, // This is 1 for TLAS
         .type = descriptor->level == WGPURayTracingAccelerationContainerLevel_Bottom ? VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR : VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
-        .dstAccelerationStructure = ret->accelerationStructure
+        .dstAccelerationStructure = VK_NULL_HANDLE
     };
 
+    VkAccelerationStructureBuildSizesInfoKHR buildSizesInfo = {
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
+    };
+    
     device->functions.vkGetAccelerationStructureBuildSizesKHR(
         device->device,
         VK_ACCELERATION_STRUCTURE_BUILD_TYPE_HOST_OR_DEVICE_KHR,
         &geometryInfoVulkan,
-        maxPrimitiveCounts,
+        maxPrimitiveCounts, // For TLAS, this array has length 1, and the value is instanceCount
         &buildSizesInfo
     );
-    
     
     ret->accelerationStructureBuffer = wgpuDeviceCreateBuffer(device, &(WGPUBufferDescriptor){
         .size = buildSizesInfo.accelerationStructureSize,
         .usage = WGPUBufferUsage_Raytracing
     });
+
     if(buildSizesInfo.updateScratchSize){
         ret->updateScratchBuffer = wgpuDeviceCreateBuffer(device, &(WGPUBufferDescriptor){
             .size = buildSizesInfo.updateScratchSize,
@@ -10770,15 +10812,24 @@ WGPURayTracingAccelerationContainer wgpuDeviceCreateRayTracingAccelerationContai
         .createFlags = 0,
     };
 
-    device->functions.vkCreateAccelerationStructureKHR(
+    VkResult casResult = device->functions.vkCreateAccelerationStructureKHR(
         device->device,
         &accelStructureCreateInfo,
         NULL,
         &ret->accelerationStructure
     );
+
+    if(casResult != VK_SUCCESS){
+        return NULL;
+    }
     
+    // Update the geometry info with the created AS handle for future use (e.g. building)
     geometryInfoVulkan.dstAccelerationStructure = ret->accelerationStructure;
-    geometryInfoVulkan.geometryCount = descriptor->geometryCount;
+    // NOTE: Do not overwrite geometryCount with descriptor->geometryCount here, 
+    // strictly keep the calculated variable which is 1 for TLAS.
+    // geometryInfoVulkan.geometryCount = geometryCount; 
+    
+    wgpuDeviceAddRef(device);
     return ret;
     EXIT();
 }
@@ -10789,6 +10840,13 @@ void wgpuCommandEncoderBuildRayTracingAccelerationContainer(WGPUCommandEncoder e
     WGPUDevice device = encoder->device;
     
     if(container->level == WGPURayTracingAccelerationContainerLevel_Top){
+        if (container->instanceBuffer) {
+            BufferUsageSnap instanceSnap = {
+                .access = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR,
+                .stage = VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+            };
+            ce_trackBuffer(encoder, container->instanceBuffer, instanceSnap);
+        }
         VkAccelerationStructureBuildGeometryInfoKHR buildInfo = {
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
             .dstAccelerationStructure = container->accelerationStructure,
@@ -10813,6 +10871,7 @@ void wgpuCommandEncoderBuildRayTracingAccelerationContainer(WGPUCommandEncoder e
             .dstAccelerationStructure = container->accelerationStructure,
             .type = toVulkanAccelerationStructureLevel(container->level),
             .pGeometries = container->geometries,
+            .geometryCount = container->geometryCount,
             .scratchData = {
                 .deviceAddress = container->buildScratchBuffer->address
             }

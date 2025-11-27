@@ -2092,6 +2092,7 @@ typedef struct WGPURayTracingAccelerationContainerImpl{
     VkAccelerationStructureGeometryKHR* geometries;
     VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos;
     uint32_t* primitiveCounts;
+    WGPUBuffer instanceBuffer;
     WGPUBuffer accelerationStructureBuffer;
     WGPUBuffer updateScratchBuffer;
     WGPUBuffer buildScratchBuffer;
@@ -2255,7 +2256,7 @@ static inline void FenceCache_Init(WGPUDevice device, FenceCache* ptr){
  * @param commandBuffers 
  */
 void PerframeCache_pushFenceDependencies(PerframeCache* pfcache, WGPUFence fence, WGPUCommandBufferVector* commandBuffers);
-void FIFCache_init(FIFCache* fifCache, WGPUDevice device, uint32_t queueFamily);
+WGPUStatus FIFCache_init(FIFCache* fifCache, WGPUDevice device, uint32_t queueFamily);
 void SyncState_destroy(WGPUDevice device, SyncState* syncState);
 void FIFCache_destroy(FIFCache* fcache);
 
