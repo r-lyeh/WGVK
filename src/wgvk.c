@@ -2261,7 +2261,7 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
         VK_KHR_SPIRV_1_4_EXTENSION_NAME,                   // "VK_KHR_spirv_1_4" - required for ray tracing shaders
         VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,       // "VK_KHR_shader_float_controls" - required by spirv_1_4
         #endif
-        VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,    // For NV12/P010
+        VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,    // For NV12/P010 textures
     };
     #define deviceExtensionsToLookForCount (sizeof(deviceExtensionsToLookFor) / sizeof(const char*))
     
@@ -2318,12 +2318,10 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     VkPhysicalDeviceFeatures2 deviceFeatures = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
     };
-    if (requiresYCbCr) {
-        ycbcrFeatures.pNext = &v13features;
-        deviceFeatures.pNext = &ycbcrFeatures;
-    } else {
-        deviceFeatures.pNext = &v13features;
-    }
+
+    ycbcrFeatures.pNext = &v13features;
+    deviceFeatures.pNext = &ycbcrFeatures;
+
     vkGetPhysicalDeviceFeatures2(adapter->physicalDevice, &deviceFeatures);
     if(pipelineFeatures.rayTracingPipeline == VK_TRUE){
         VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingPipelineProperties = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
