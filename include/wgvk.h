@@ -397,6 +397,14 @@ typedef enum WGPUFrontFace {
     WGPUFrontFace_Force32 = 0x7FFFFFFF
 } WGPUFrontFace WGPU_ENUM_ATTRIBUTE;
 
+typedef enum WGPUPolygonMode {
+    WGPUPolygonMode_Undefined = 0x00000000,
+    WGPUPolygonMode_Fill = 0x00000001,
+    WGPUPolygonMode_Line = 0x00000002,
+    WGPUPolygonMode_Point = 0x00000003,
+    WGPUPolygonMode_Force32 = 0x7FFFFFFF
+} WGPUPolygonMode WGPU_ENUM_ATTRIBUTE;
+
 typedef enum WGPUVertexStepMode { 
     WGPUVertexStepMode_Undefined = 0x0, 
     WGPUVertexStepMode_Vertex = 0x1,
@@ -820,6 +828,8 @@ typedef enum WGPUFeatureName {
     WGPUFeatureName_CoreFeaturesAndLimits = 0x00000012,
     WGPUFeatureName_TextureFormatNV12 = 0x00000013,
     WGPUFeatureName_TextureFormatP010 = 0x00000014,
+    WGPUFeatureName_PolygonModeLine = 0x00000015,
+    WGPUFeatureName_PolygonModePoint = 0x00000016,
     WGPUFeatureName_Force32 = 0x7FFFFFFF
 } WGPUFeatureName;
 
@@ -1630,6 +1640,7 @@ typedef struct WGPUPrimitiveState {
     WGPUFrontFace frontFace;
     WGPUCullMode cullMode;
     WGPUBool32 unclippedDepth;
+    WGPUPolygonMode polygonMode;
 } WGPUPrimitiveState;
 
 typedef enum WGPUStencilOperation {
