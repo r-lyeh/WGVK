@@ -3498,6 +3498,13 @@ static inline WGPUTextureFormat fromVulkanPixelFormat(VkFormat format) {
         case VK_FORMAT_ASTC_12x10_SRGB_BLOCK: return WGPUTextureFormat_ASTC12x10UnormSrgb;
         case VK_FORMAT_ASTC_12x12_UNORM_BLOCK: return WGPUTextureFormat_ASTC12x12Unorm;
         case VK_FORMAT_ASTC_12x12_SRGB_BLOCK: return WGPUTextureFormat_ASTC12x12UnormSrgb;
+        case VK_FORMAT_G8_B8R8_2PLANE_420_UNORM: return WGPUTextureFormat_R8BG8Biplanar420Unorm;
+        case VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16: return WGPUTextureFormat_R10X6BG10X6Biplanar420Unorm;
+        case VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM: return WGPUTextureFormat_R8BG8A8Triplanar420Unorm;
+        case VK_FORMAT_G8_B8R8_2PLANE_422_UNORM: return WGPUTextureFormat_R8BG8Biplanar422Unorm;
+        case VK_FORMAT_G8_B8R8_2PLANE_444_UNORM: return WGPUTextureFormat_R8BG8Biplanar444Unorm;
+        case VK_FORMAT_G10X6_B10X6R10X6_2PLANE_422_UNORM_3PACK16: return WGPUTextureFormat_R10X6BG10X6Biplanar422Unorm;
+        case VK_FORMAT_G10X6_B10X6R10X6_2PLANE_444_UNORM_3PACK16: return WGPUTextureFormat_R10X6BG10X6Biplanar444Unorm;
         default:                                     return WGPUTextureFormat_Undefined;
     }
 }
