@@ -313,7 +313,7 @@ RGAPI tc_SpirvBlob wgslToSpirv(const WGPUShaderSourceWGSL *source, uint32_t cons
             auto singleEntryPointResult = tint::core::ir::transform::SingleEntryPoint(module, entryPoints[i].name);
             
             if(singleEntryPointResult == tint::Success){    
-                tint::core::ir::transform::SubstituteOverridesConfig cfg{};
+                tint::SubstituteOverridesConfig cfg{};
 
                 const tint::Vector<const tint::ast::Node*, 64>& gd = prog.AST().GlobalDeclarations();
                 std::unordered_map<std::string, double> override_name_to_value;
@@ -341,8 +341,8 @@ RGAPI tc_SpirvBlob wgslToSpirv(const WGPUShaderSourceWGSL *source, uint32_t cons
                     cfg.map.insert({ovr.id, 1.0});
                 }
                 auto substituteOverridesResult = tint::core::ir::transform::SubstituteOverrides(module, cfg);
-                
                 tint::spirv::writer::Options options{};
+                options.entry_point_name = entryPoints[i].name;
 
                 tint::Result<tint::spirv::writer::Output> spirvMaybe = tint::spirv::writer::Generate(module, options);
                 if(spirvMaybe == tint::Success){

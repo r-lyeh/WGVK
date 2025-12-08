@@ -146,7 +146,7 @@ if(WGVK_BUILD_WGSL_SUPPORT)
   option(TINT_ENABLE_IR_VALIDATION "" OFF)
   FetchContent_Declare(
     dawn
-    URL https://github.com/manuel5975p/dawn_monorepo/archive/refs/tags/chromium/7369-fixed.tar.gz
+    URL https://github.com/manuel5975p/dawn_monorepo/archive/refs/tags/v7562.tar.gz
     DOWNLOAD_EXTRACT_TIMESTAMP True
   )
   FetchContent_MakeAvailable(dawn)

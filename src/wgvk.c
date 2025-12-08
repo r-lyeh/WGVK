@@ -4203,8 +4203,10 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
     #endif
     float ones[4] = {1,1,1,1};
     device->functions.vkCmdSetBlendConstants(destination, ones);
-    const float vpWidth = (float)beginInfo->colorAttachments[0].view->width;
-    const float vpHeight = (float)beginInfo->colorAttachments[0].view->height;
+    const float vpWidth         = (float)beginInfo->colorAttachments[0].view->width;
+    const uint32_t vpWidth_u32  = beginInfo->colorAttachments[0].view->width;
+    const float vpHeight        = (float)beginInfo->colorAttachments[0].view->height;
+    const uint32_t vpHeight_u32 = beginInfo->colorAttachments[0].view->height;
     
     const VkViewport viewport = {
         .x        = 0,
@@ -4221,8 +4223,8 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
             .y = 0,
         },
         .extent = {
-            .width = vpWidth,
-            .height = vpHeight,
+            .width = vpWidth_u32,
+            .height = vpHeight_u32,
         }
     };
     for(uint32_t i = 0;i < beginInfo->colorAttachmentCount;i++){
@@ -4319,11 +4321,11 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
         break;
         case rp_command_type_set_stencil_reference: {
             const RenderPassCommandSetStencilReference* setStencilReference = &command->setStencilReference;
-            //device->functions.vkCmdSetStencilReference(
-            //    destinationVk,
-            //    VK_STENCIL_FACE_FRONT_BIT | VK_STENCIL_FACE_BACK_BIT,
-            //    setStencilReference->reference
-            //);
+            device->functions.vkCmdSetStencilReference(
+                destinationVk,
+                VK_STENCIL_FACE_FRONT_BIT | VK_STENCIL_FACE_BACK_BIT,
+                setStencilReference->reference
+            );
         }break;
         case rp_command_type_set_blend_constant:{
             const RenderPassCommandSetBlendConstant* setBlendConstant = &command->setBlendConstant;
@@ -4356,16 +4358,16 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
         }break;
         case rp_command_type_set_scissor_rect:{
             const RenderPassCommandSetScissorRect* sr = &command->setScissorRect;
-            destination_->dynamicState.scissorRect = (VkRect2D){{sr->x, sr->y}, {sr->width, sr->height}};
+            destination_->dynamicState.scissorRect = (VkRect2D){{(int32_t)sr->x, (int32_t)sr->y}, {sr->width, sr->height}};
             const VkRect2D scissors[8] = {
-                {{sr->x, sr->y}, {sr->width, sr->height}},
-                {{sr->x, sr->y}, {sr->width, sr->height}},
-                {{sr->x, sr->y}, {sr->width, sr->height}},
-                {{sr->x, sr->y}, {sr->width, sr->height}},
-                {{sr->x, sr->y}, {sr->width, sr->height}},
-                {{sr->x, sr->y}, {sr->width, sr->height}},
-                {{sr->x, sr->y}, {sr->width, sr->height}},
-                {{sr->x, sr->y}, {sr->width, sr->height}},
+                {{(int32_t)sr->x, (int32_t)sr->y}, {sr->width, sr->height}},
+                {{(int32_t)sr->x, (int32_t)sr->y}, {sr->width, sr->height}},
+                {{(int32_t)sr->x, (int32_t)sr->y}, {sr->width, sr->height}},
+                {{(int32_t)sr->x, (int32_t)sr->y}, {sr->width, sr->height}},
+                {{(int32_t)sr->x, (int32_t)sr->y}, {sr->width, sr->height}},
+                {{(int32_t)sr->x, (int32_t)sr->y}, {sr->width, sr->height}},
+                {{(int32_t)sr->x, (int32_t)sr->y}, {sr->width, sr->height}},
+                {{(int32_t)sr->x, (int32_t)sr->y}, {sr->width, sr->height}},
             };
             device->functions.vkCmdSetScissor(destinationVk, 0, beginInfo->colorAttachmentCount, scissors);
         }break;
