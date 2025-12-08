@@ -6260,7 +6260,20 @@ WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice device, const WGPUR
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable = VK_TRUE; // Usually false unless specific features needed
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL; // Default
+    // Map polygon mode from descriptor
+    switch(descriptor->primitive.polygonMode) {
+        case WGPUPolygonMode_Line:
+            rasterizer.polygonMode = VK_POLYGON_MODE_LINE;
+            break;
+        case WGPUPolygonMode_Point:
+            rasterizer.polygonMode = VK_POLYGON_MODE_POINT;
+            break;
+        case WGPUPolygonMode_Fill:
+        case WGPUPolygonMode_Undefined:
+        default:
+            rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+            break;
+    }
     if(descriptor->primitive.nextInChain && descriptor->primitive.nextInChain->sType == WGPUSType_PrimitiveLineWidthInfo){
         rasterizer.lineWidth = (float)((WGPUPrimitiveLineWidthInfo*)descriptor->primitive.nextInChain)->lineWidth;
     }
@@ -8417,6 +8430,12 @@ void wgpuAdapterGetFeatures(WGPUAdapter adapter, WGPUSupportedFeatures* features
         if (props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) {
             supported_features[count++] = WGPUFeatureName_TextureFormatP010;
         }
+    }
+
+    // Check polygon mode support (fillModeNonSolid feature)
+    if (adapter->deviceInfoCache.knobs.features.features.fillModeNonSolid) {
+        supported_features[count++] = WGPUFeatureName_PolygonModeLine;
+        supported_features[count++] = WGPUFeatureName_PolygonModePoint;
     }
 
     supported_features[count++] = WGPUFeatureName_CoreFeaturesAndLimits;
