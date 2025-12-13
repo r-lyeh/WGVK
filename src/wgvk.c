@@ -3371,7 +3371,7 @@ WGPUShaderModule wgpuDeviceCreateShaderModule(WGPUDevice device, const WGPUShade
                 VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
                 NULL,
                 0,
-                source->codeSize * 4,
+                (size_t)source->codeSize * 4,
                 source->code
             };
             device->functions.vkCreateShaderModule(device->device, &sCreateInfo, NULL, &ret->vulkanModuleMultiEP);
@@ -6082,6 +6082,8 @@ void wgpuQueueRelease                         (WGPUQueue queue){
     EXIT();
 }
 
+
+
 WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, const WGPUComputePipelineDescriptor* descriptor){
     ENTRY();
     WGPUComputePipeline ret = RL_CALLOC(1, sizeof(WGPUComputePipelineImpl));
@@ -6093,18 +6095,30 @@ WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, const WGP
     memcpy(namebuffer, descriptor->compute.entryPoint.data, descriptor->compute.entryPoint.length);
     namebuffer[descriptor->compute.entryPoint.length] = 0;
     
-    
+    VkShaderModule vkModule = VK_NULL_HANDLE;
+    if(descriptor->compute.module->vulkanModuleMultiEP){
+        vkModule = descriptor->compute.module->vulkanModuleMultiEP;
+    }
+    else{
+        for(uint32_t i = 0;i < WGPUShaderStageEnum_EnumCount;i++){
+            ///TODO: get rid of magic 16 constant.
+            if(wgpuStrcmpcn(descriptor->compute.entryPoint, descriptor->compute.module->modules[i].epName, 16) == 0){
+                vkModule = descriptor->compute.module->modules[i].module;
+                break;
+            }
+        }
+    }
     VkPipelineShaderStageCreateInfo computeStage = {
         VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
         NULL,
         0,
         VK_SHADER_STAGE_COMPUTE_BIT,
-        descriptor->compute.module->vulkanModuleMultiEP,
+        vkModule,
         namebuffer,
         NULL
     };
 
-    VkComputePipelineCreateInfo cpci = {
+    const VkComputePipelineCreateInfo cpci = {
         VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
         NULL,
         0,
@@ -6113,6 +6127,7 @@ WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, const WGP
         0,
         0
     };
+
     device->functions.vkCreateComputePipelines(
         device->device,
         NULL,
