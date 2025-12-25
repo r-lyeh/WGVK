@@ -1315,6 +1315,10 @@ WGPUInstance wgpuCreateInstance(const WGPUInstanceDescriptor* descriptor) {
     VkResult layerEnumResult = vkEnumerateInstanceLayerProperties(&availableLayerCount, NULL);
     if(layerEnumResult == VK_SUCCESS){
         layerEnumResult = vkEnumerateInstanceLayerProperties(&availableLayerCount, availableLayers);
+        fprintf(stderr, "Available layers: %d\n", (int)availableLayerCount);
+        for(uint32_t li = 0;li < availableLayerCount;li++){
+            fprintf(stderr, "   [%u]: %s\n", li, availableLayers[li].layerName);
+        }
     }
     if(layerEnumResult != VK_SUCCESS){
         fprintf(stderr, "vkEnumerateInstanceLayerProperties failed: %s\n", vkErrorString(layerEnumResult));
@@ -1395,7 +1399,7 @@ WGPUInstance wgpuCreateInstance(const WGPUInstanceDescriptor* descriptor) {
         .enabledLayerCount   = (validationFeatures.sType == VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT) ? requestedAvailableLayerCount : 0,
         .ppEnabledLayerNames = (validationFeatures.sType == VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT) ? nullTerminatedRequestedLayerPointers : NULL,
     };
-    //printf("Enabled layer count: %d\n", ici.enabledLayerCount);
+    // printf("Enabled layer count: %s\n", nullTerminatedRequestedLayerPointers[0]);
     VkResult result = vkCreateInstance(&ici, NULL, &ret->instance);
     if(result != VK_SUCCESS){
         fprintf(stderr, "vkCreateInstance failed: %s\n", vkErrorString(result));
@@ -2341,9 +2345,9 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
         adapter->rayTracingPipelineProperties    = (VkPhysicalDeviceRayTracingPipelinePropertiesKHR){0};
         adapter->accelerationStructureProperties = (VkPhysicalDeviceAccelerationStructurePropertiesKHR){0};
     }
-    #ifdef __APPLE__
-    deviceExtensionsFound[extInsertIndex++] = "VK_KHR_portability_subset";
-    #endif
+    if(adapter->deviceInfoCache.driverProperties.driverID == VK_DRIVER_ID_MOLTENVK){
+        deviceExtensionsFound[extInsertIndex++] = "VK_KHR_portability_subset";
+    }
     VkDeviceCreateInfo createInfo = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = &deviceFeatures,
@@ -3972,7 +3976,7 @@ WGPURenderPassEncoder wgpuCommandEncoderBeginRenderPass(WGPUCommandEncoder enc, 
 
     const ImageUsageSnap iur_color = {
         .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
         .stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
         .subresource = {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -3987,8 +3991,8 @@ WGPURenderPassEncoder wgpuCommandEncoderBeginRenderPass(WGPUCommandEncoder enc, 
     
     const ImageUsageSnap iur_depth = {
         .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        .access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-        .stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        .stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         .subresource = {
             .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
             .baseMipLevel = 0,
@@ -7089,6 +7093,10 @@ void resetFenceAndReleaseBuffers(void* fence_, WGPUCommandBufferVector* cBuffers
 
 void wgpuSurfaceGetCurrentTexture(WGPUSurface surface, WGPUSurfaceTexture* surfaceTexture){
     ENTRY();
+
+    wgvk_assert(surfaceTexture, "surfaceTexture must be nonnull");
+    wgvk_assert(surface->device, "surface->device must be nonnull");
+    
     const size_t submittedframes = surface->device->submittedFrames;
     const uint32_t cacheIndex = surface->device->submittedFrames % framesInFlight;
     SyncState* syncState = DeviceGetSyncState(surface->device, cacheIndex);
