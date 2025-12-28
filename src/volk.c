@@ -33,11 +33,13 @@
 #endif
 
 #if SUPPORT_METAL_SURFACE == 1 // For macOS/iOS using MoltenVK
-    #define VK_EXT_metal_surface 1 // Define set to 1 for clarity (Note: EXT, not KHR)
+    #define VK_EXT_metal_surface 1
+	#define VK_MVK_macos_surface 1
     // No specific native C header needed here usually, CAMetalLayer is often handled via void*
     // If Objective-C interop is used elsewhere, #import <Metal/Metal.h> would be needed there.
     #define VK_NO_PROTOTYPES
     #include <vulkan/vulkan.h>
+    #include <vulkan/vulkan_macos.h>
     #include <vulkan/vulkan_metal.h>
 #endif
 
