@@ -728,11 +728,12 @@ WGPUStatus wgpuAdapterGetLimits(WGPUAdapter adapter, WGPULimits* limits) WGPU_FU
     limits->minUniformBufferOffsetAlignment = deviceProperties2->properties.limits.minUniformBufferOffsetAlignment;
     limits->minStorageBufferOffsetAlignment = deviceProperties2->properties.limits.minStorageBufferOffsetAlignment;
     limits->maxVertexBuffers = deviceProperties2->properties.limits.maxVertexInputBindings;
-    limits->maxBufferSize = deviceProperties2->properties.limits.maxMemoryAllocationCount; // This is a weak mapping, ideally there's a buffer size limit.
+    limits->maxBufferSize = adapter->deviceInfoCache.propertiesMaintenance3.maxMemoryAllocationSize;
     limits->maxVertexAttributes = deviceProperties2->properties.limits.maxVertexInputAttributes;
     limits->maxVertexBufferArrayStride = deviceProperties2->properties.limits.maxVertexInputBindingStride;
-    limits->maxInterStageShaderVariables = deviceProperties2->properties.limits.maxFragmentInputComponents; // Assuming this maps to inter-stage variables.
+    limits->maxInterStageShaderVariables = MIN(deviceProperties2->properties.limits.maxVertexOutputComponents, deviceProperties2->properties.limits.maxFragmentInputComponents) / 4;
     limits->maxColorAttachments = deviceProperties2->properties.limits.maxColorAttachments;
+    limits->maxColorAttachmentBytesPerSample = 32;
 
     limits->maxComputeWorkgroupStorageSize = deviceProperties2->properties.limits.maxComputeSharedMemorySize;
     limits->maxComputeInvocationsPerWorkgroup = deviceProperties2->properties.limits.maxComputeWorkGroupInvocations;
@@ -741,10 +742,18 @@ WGPUStatus wgpuAdapterGetLimits(WGPUAdapter adapter, WGPULimits* limits) WGPU_FU
     limits->maxComputeWorkgroupSizeZ = deviceProperties2->properties.limits.maxComputeWorkGroupSize[2];
     limits->maxComputeWorkgroupsPerDimension = MIN(deviceProperties2->properties.limits.maxComputeWorkGroupCount[0], MIN(deviceProperties2->properties.limits.maxComputeWorkGroupCount[1], deviceProperties2->properties.limits.maxComputeWorkGroupCount[2]));
     
-    limits->maxStorageBuffersInVertexStage = deviceProperties2->properties.limits.maxPerStageDescriptorStorageBuffers;
-    limits->maxStorageTexturesInVertexStage = deviceProperties2->properties.limits.maxPerStageDescriptorStorageImages;
-    limits->maxStorageBuffersInFragmentStage = deviceProperties2->properties.limits.maxPerStageDescriptorStorageBuffers;
-    limits->maxStorageTexturesInFragmentStage = deviceProperties2->properties.limits.maxPerStageDescriptorStorageImages;
+    WGPUChainedStruct* chain = limits->nextInChain;
+    while (chain) {
+        if (chain->sType == WGPUSType_ExtrasLimits) {
+            WGPUExtrasLimits* extras = (WGPUExtrasLimits*)chain;
+            extras->maxStorageBuffersInVertexStage = deviceProperties2->properties.limits.maxPerStageDescriptorStorageBuffers;
+            extras->maxStorageTexturesInVertexStage = deviceProperties2->properties.limits.maxPerStageDescriptorStorageImages;
+            extras->maxStorageBuffersInFragmentStage = deviceProperties2->properties.limits.maxPerStageDescriptorStorageBuffers;
+            extras->maxStorageTexturesInFragmentStage = deviceProperties2->properties.limits.maxPerStageDescriptorStorageImages;
+            break;
+        }
+        chain = chain->next;
+    }
 
     EXIT();
     return WGPUStatus_Success;
@@ -2204,7 +2213,6 @@ typedef struct userdataforcreatedevice{
     WGPURequestDeviceCallbackInfo callbackInfo;
 }userdataforcreatedevice;
 
-
 WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescriptor* descriptor){
     ENTRY();
     //std::pair<WGPUDevice, WGPUQueue> ret = {0,0};
@@ -2379,6 +2387,132 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     retDevice->capabilities.raytracing = pipelineFeatures.rayTracingPipeline && accelerationStructureFeatures.accelerationStructure;
     retDevice->capabilities.shaderDeviceAddress = deviceFeaturesAddressKhr.bufferDeviceAddress;
     retDevice->uncapturedErrorCallbackInfo = descriptor->uncapturedErrorCallbackInfo;
+
+    // Get adapter's supported limits
+    WGPULimits adapterLimits = {0};
+    WGPUExtrasLimits adapterExtrasLimits = {0};
+    adapterLimits.nextInChain = (WGPUChainedStruct*)&adapterExtrasLimits;
+    adapterExtrasLimits.chain.sType = WGPUSType_ExtrasLimits;
+    adapterExtrasLimits.chain.next = NULL;
+    wgpuAdapterGetLimits(adapter, &adapterLimits);
+    adapterLimits.nextInChain = NULL;
+
+    // Validate requiredLimits if provided
+    if(descriptor->requiredLimits){
+        WGPUExtrasLimits* reqExtras = NULL;
+        WGPUChainedStruct* chain = descriptor->requiredLimits->nextInChain;
+        while(chain){
+            if(chain->sType == WGPUSType_ExtrasLimits){
+                reqExtras = (WGPUExtrasLimits*)chain;
+                break;
+            }
+            chain = chain->next;
+        }
+        
+        // Check all limits and collect errors
+        int hasError = 0;
+        const WGPULimits* required = descriptor->requiredLimits;
+        const WGPULimits* supported = &adapterLimits;
+        
+        #define CHECK_MAX_LIMIT(field) \
+            if (required->field > supported->field) { \
+                TRACELOG(WGPU_LOG_ERROR, "Required limit " #field " (%llu) exceeds adapter capabilities (%llu)", \
+                         (unsigned long long)required->field, (unsigned long long)supported->field); \
+                hasError = 1; \
+            }
+        
+        CHECK_MAX_LIMIT(maxTextureDimension1D);
+        CHECK_MAX_LIMIT(maxTextureDimension2D);
+        CHECK_MAX_LIMIT(maxTextureDimension3D);
+        CHECK_MAX_LIMIT(maxTextureArrayLayers);
+        CHECK_MAX_LIMIT(maxBindGroups);
+        CHECK_MAX_LIMIT(maxBindGroupsPlusVertexBuffers);
+        CHECK_MAX_LIMIT(maxBindingsPerBindGroup);
+        CHECK_MAX_LIMIT(maxDynamicUniformBuffersPerPipelineLayout);
+        CHECK_MAX_LIMIT(maxDynamicStorageBuffersPerPipelineLayout);
+        CHECK_MAX_LIMIT(maxSampledTexturesPerShaderStage);
+        CHECK_MAX_LIMIT(maxSamplersPerShaderStage);
+        CHECK_MAX_LIMIT(maxStorageBuffersPerShaderStage);
+        CHECK_MAX_LIMIT(maxStorageTexturesPerShaderStage);
+        CHECK_MAX_LIMIT(maxUniformBuffersPerShaderStage);
+        CHECK_MAX_LIMIT(maxUniformBufferBindingSize);
+        CHECK_MAX_LIMIT(maxStorageBufferBindingSize);
+        CHECK_MAX_LIMIT(maxVertexBuffers);
+        CHECK_MAX_LIMIT(maxBufferSize);
+        CHECK_MAX_LIMIT(maxVertexAttributes);
+        CHECK_MAX_LIMIT(maxVertexBufferArrayStride);
+        CHECK_MAX_LIMIT(maxInterStageShaderVariables);
+        CHECK_MAX_LIMIT(maxColorAttachments);
+        CHECK_MAX_LIMIT(maxColorAttachmentBytesPerSample);
+        CHECK_MAX_LIMIT(maxComputeWorkgroupStorageSize);
+        CHECK_MAX_LIMIT(maxComputeInvocationsPerWorkgroup);
+        CHECK_MAX_LIMIT(maxComputeWorkgroupSizeX);
+        CHECK_MAX_LIMIT(maxComputeWorkgroupSizeY);
+        CHECK_MAX_LIMIT(maxComputeWorkgroupSizeZ);
+        CHECK_MAX_LIMIT(maxComputeWorkgroupsPerDimension);
+        
+        #undef CHECK_MAX_LIMIT
+        
+        // Check alignment limits (lower is better, must be >= supported and power of 2)
+        #define IS_POWER_OF_2(x) ((x) != 0 && ((x) & ((x) - 1)) == 0)
+        
+        #define CHECK_ALIGNMENT_LIMIT(field) \
+            if (!IS_POWER_OF_2(required->field)) { \
+                TRACELOG(WGPU_LOG_ERROR, "Required limit " #field " (%u) must be a power of 2", \
+                         required->field); \
+                hasError = 1; \
+            } else if (required->field < supported->field) { \
+                TRACELOG(WGPU_LOG_ERROR, "Required limit " #field " (%u) is stricter than adapter capabilities (%u)", \
+                         required->field, supported->field); \
+                hasError = 1; \
+            }
+        
+        CHECK_ALIGNMENT_LIMIT(minUniformBufferOffsetAlignment);
+        CHECK_ALIGNMENT_LIMIT(minStorageBufferOffsetAlignment);
+        
+        #undef CHECK_ALIGNMENT_LIMIT
+        #undef IS_POWER_OF_2
+        
+        // Check extras limits if both are present
+        if (reqExtras) {
+            #define CHECK_EXTRAS_LIMIT(field) \
+                if (reqExtras->field > adapterExtrasLimits.field) { \
+                    TRACELOG(WGPU_LOG_ERROR, "Required limit " #field " (%u) exceeds adapter capabilities (%u)", \
+                             reqExtras->field, adapterExtrasLimits.field); \
+                    hasError = 1; \
+                }
+            
+            CHECK_EXTRAS_LIMIT(maxStorageBuffersInVertexStage);
+            CHECK_EXTRAS_LIMIT(maxStorageTexturesInVertexStage);
+            CHECK_EXTRAS_LIMIT(maxStorageBuffersInFragmentStage);
+            CHECK_EXTRAS_LIMIT(maxStorageTexturesInFragmentStage);
+            
+            #undef CHECK_EXTRAS_LIMIT
+        }
+        
+        if(hasError){
+            // Clean up and return NULL
+            retDevice->functions.vkDestroyDevice(retDevice->device, NULL);
+            RL_FREE(retDevice);
+            RL_FREE(retQueue);
+            RL_FREE(deprops);
+            return NULL;
+        }
+        
+        // Limits validated, now set them on the device
+        retDevice->limits = *descriptor->requiredLimits;
+        retDevice->limits.nextInChain = NULL;
+        if(reqExtras){
+            retDevice->extrasLimits = *reqExtras;
+        }
+    } else {
+        // No required limits, use adapter's limits
+        retDevice->limits = adapterLimits;
+        retDevice->limits.nextInChain = NULL;
+        retDevice->extrasLimits = adapterExtrasLimits;
+    }
+    retDevice->extrasLimits.chain.sType = WGPUSType_ExtrasLimits;
+    retDevice->extrasLimits.chain.next = NULL;
 
     // Retrieve and assign queues
     
@@ -9042,8 +9176,26 @@ void wgpuDeviceGetFeatures(WGPUDevice device, WGPUSupportedFeatures * features) 
 }
 WGPUStatus wgpuDeviceGetLimits(WGPUDevice device, WGPULimits * limits) {
     ENTRY();
+    if(limits){
+        WGPUChainedStruct* userChain = limits->nextInChain;
+        *limits = device->limits;
+        limits->nextInChain = userChain;
+
+        WGPUChainedStruct* chain = limits->nextInChain;
+        while (chain) {
+            if (chain->sType == WGPUSType_ExtrasLimits) {
+                WGPUExtrasLimits* extras = (WGPUExtrasLimits*)chain;
+                // Preserve the chain
+                WGPUChainedStruct chainCopy = extras->chain;
+                *extras = device->extrasLimits;
+                extras->chain = chainCopy;
+                break;
+            }
+            chain = chain->next;
+        }
+    }
     EXIT();
-    return WGPUStatus_Error;
+    return WGPUStatus_Success;
 }
 WGPUFuture wgpuDeviceGetLostFuture(WGPUDevice device) {
     ENTRY();
