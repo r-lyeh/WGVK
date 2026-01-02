@@ -391,3 +391,18 @@ For more examples and documentation, visit:
 https://github.com/manuel5975p/WGVK
 \")
 ")
+
+if(BUILD_TESTING)
+  set(WGVK_BUILD_GLSL_SUPPORT ON CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.17.0.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP True
+  )
+  FetchContent_MakeAvailable(googletest)
+  enable_testing()
+  add_executable(unit_tests tests/wgvk_unit_tests.cpp)
+  target_link_libraries(unit_tests GTest::gtest_main wgvk)
+  include(GoogleTest)
+  gtest_discover_tests(unit_tests)
+endif()

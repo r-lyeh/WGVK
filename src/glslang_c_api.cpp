@@ -125,20 +125,38 @@ WGPUShaderModule wgpuDeviceCreateShaderModuleGLSL(WGPUDevice device, const WGPUS
         glslang_initialize_process_called = 1;
     }
     wgvk_assert(shDesc->nextInChain->sType == WGPUSType_ShaderSourceGLSL, "nextInChain->sType must be WGPUSType_ShaderSourceGLSL");
+    
     WGPUShaderSourceGLSL* source = (WGPUShaderSourceGLSL*)shDesc->nextInChain;
     std::vector<uint32_t> spirvSource = glsl_to_spirv_single(device, source->code, wgpuShaderStageToGlslang(source->stage), glslang::EShTargetVulkan_1_4, glslang::EShTargetSpv_1_4);
+    
     WGPUShaderModule shadermodule = (WGPUShaderModuleImpl*)RL_CALLOC(1, sizeof(WGPUShaderModuleImpl));
+    if (!shadermodule) return nullptr;
+
     WGPUShaderSourceGLSL* copy = (WGPUShaderSourceGLSL*)RL_CALLOC(1, sizeof(WGPUShaderSourceGLSL));
+    if (!copy) {
+        RL_FREE(shadermodule);
+        return nullptr;
+    }
+
     copy->chain.sType = source->chain.sType;
     copy->stage = source->stage;
+    
     size_t length = wgpuStrlen(source->code);
     copy->code.data = (char*)std::malloc(length + 1);
+    if (!copy->code.data) {
+        RL_FREE(copy);
+        RL_FREE(shadermodule);
+        return nullptr;
+    }
+
     std::memcpy(const_cast<char*>(copy->code.data), source->code.data, length);
     const_cast<char*>(copy->code.data)[length] = '\0';
     copy->code.length = WGPU_STRLEN;
+    
     shadermodule->source = (WGPUChainedStruct*)copy;
     shadermodule->device = device;
     shadermodule->refCount = 1;
+    
     VkShaderModule vkModule = VK_NULL_HANDLE;
     VkShaderModuleCreateInfo sci = {
         VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -147,14 +165,33 @@ WGPUShaderModule wgpuDeviceCreateShaderModuleGLSL(WGPUDevice device, const WGPUS
         spirvSource.size() * sizeof(uint32_t),
         spirvSource.data(),
     };
+    
     VkResult createResult = device->functions.vkCreateShaderModule(device->device, &sci, nullptr, &vkModule);
     if(createResult != VK_SUCCESS){
         std::free(const_cast<char*>(copy->code.data));
-        std::free(copy);
-        std::free(shadermodule);
+        RL_FREE(copy);
+        RL_FREE(shadermodule);
         return nullptr;
     }
-    shadermodule->modules[wgpuShaderStageToEnum(source->stage)].module = vkModule;
+    
+    WGPUShaderStageEnum stageIndex = wgpuShaderStageToEnum(source->stage);
+    if(stageIndex < WGPUShaderStageEnum_EnumCount) {
+        shadermodule->modules[stageIndex].module = vkModule;
+        // GLSL entry point is typically "main". Safely copy it into the fixed-size buffer.
+        // epName is char[16] in WGPUShaderModuleSingleEntryPoint.
+        const char* entryName = "main";
+        #if defined(_MSC_VER)
+            strncpy_s(shadermodule->modules[stageIndex].epName, sizeof(shadermodule->modules[stageIndex].epName), entryName, _TRUNCATE);
+        #else
+            strncpy(shadermodule->modules[stageIndex].epName, entryName, sizeof(shadermodule->modules[stageIndex].epName) - 1);
+            shadermodule->modules[stageIndex].epName[sizeof(shadermodule->modules[stageIndex].epName) - 1] = '\0';
+        #endif
+    } else {
+        // Fallback for safety to ensure the module handle isn't lost if the stage mapping fails,
+        // though strictly speaking this path implies an invalid stage.
+        shadermodule->vulkanModuleMultiEP = vkModule;
+    }
+    
     return shadermodule;
 }
 

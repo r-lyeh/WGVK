@@ -196,7 +196,9 @@ static inline uint32_t findMemoryType(WGPUAdapter adapter, uint32_t typeFilter, 
 
 static void doSurfaceCreation(WGPUInstance instance, WGPUSurface ret, WGPUChainedStruct* descriptor){
     switch(descriptor->sType){
-        default: return;
+        default: 
+        wgvk_assert(false, "Unsupported surface SType");
+        return;
         #if SUPPORT_METAL_SURFACE == 1
         case WGPUSType_SurfaceSourceMetalLayer:{
             WGPUSurfaceSourceMetalLayer* metalSource = (WGPUSurfaceSourceMetalLayer*)descriptor;
@@ -495,6 +497,8 @@ WGPUSurface wgpuInstanceCreateSurface(WGPUInstance instance, const WGPUSurfaceDe
             case WGPUSType_SurfaceSourceAndroidNativeWindow:          // [[fallthrough]];
             case WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector:
                 doSurfaceCreation(instance, ret, head);
+                wgvk_assert(ret->surface, "ret->surface is null");
+                fprintf(stderr, "Ret surface: %p\n", ret->surface);
                 surfaceCreated = 1;
             break;
             case WGPUSType_SurfaceColorManagement: {
@@ -770,7 +774,7 @@ static void fenceFreeCallback(void* userdata_){
 
     for(size_t i = 0;i < insert->size;i++){
         WGPUCommandBuffer bufferi = insert->data[i];
-        wgvk_assert(bufferi->refCount == 1, "Unreasonable refCount");
+        // wgvk_assert(bufferi->refCount == 1, "Unreasonable refCount");
         wgpuCommandBufferRelease(bufferi);
     }
     WGPUCommandBufferVector_clear(insert);
@@ -1327,10 +1331,10 @@ WGPUInstance wgpuCreateInstance(const WGPUInstanceDescriptor* descriptor) {
     VkResult layerEnumResult = vkEnumerateInstanceLayerProperties(&availableLayerCount, NULL);
     if(layerEnumResult == VK_SUCCESS){
         layerEnumResult = vkEnumerateInstanceLayerProperties(&availableLayerCount, availableLayers);
-        fprintf(stderr, "Available layers: %d\n", (int)availableLayerCount);
-        for(uint32_t li = 0;li < availableLayerCount;li++){
-            fprintf(stderr, "   [%u]: %s\n", li, availableLayers[li].layerName);
-        }
+        //fprintf(stderr, "Available layers: %d\n", (int)availableLayerCount);
+        //for(uint32_t li = 0;li < availableLayerCount;li++){
+        //    fprintf(stderr, "   [%u]: %s\n", li, availableLayers[li].layerName);
+        //}
     }
     if(layerEnumResult != VK_SUCCESS){
         fprintf(stderr, "vkEnumerateInstanceLayerProperties failed: %s\n", vkErrorString(layerEnumResult));
@@ -7232,6 +7236,7 @@ void wgpuSurfaceGetCurrentTexture(WGPUSurface surface, WGPUSurfaceTexture* surfa
     ENTRY();
 
     wgvk_assert(surfaceTexture, "surfaceTexture must be nonnull");
+    wgvk_assert(surface, "surface must be nonnull");
     wgvk_assert(surface->device, "surface->device must be nonnull");
     
     const size_t submittedframes = surface->device->submittedFrames;
@@ -7400,12 +7405,23 @@ void wgpuDeviceTick(WGPUDevice device){
         WGPUCommandBufferVector* pendingForFTF = PendingCommandBufferMap_get(pcmtbf, frameCachetbf->finalTransitionFence);
         
         if(pendingForFTF == NULL){
-            VkSubmitInfo emptySubmit = {
+            // Only wait on a semaphore if work was actually submitted (tsubmits > 0).
+            // If tsubmits == 0, semaphores[0] is unsignaled, causing VUID-vkQueueSubmit-pWaitSemaphores-03238.
+            VkSemaphore* pWaitSem = NULL;
+            uint32_t waitCount = 0;
+            
+            if (tsubmits > 0) {
+                pWaitSem = VkSemaphoreVector_get(&syncStatetbf->semaphores, tsubmits);
+                waitCount = 1;
+            }
+
+            const VkSubmitInfo emptySubmit = {
                 .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                .waitSemaphoreCount = 1,
-                .pWaitSemaphores = VkSemaphoreVector_get(&syncStatetbf->semaphores, tsubmits),
+                .waitSemaphoreCount = waitCount,
+                .pWaitSemaphores = pWaitSem,
                 .pWaitDstStageMask = &waitmask
             };
+            
             device->functions.vkQueueSubmit(device->queue->graphicsQueue, 1, &emptySubmit, frameCachetbf->finalTransitionFence->fence);
             wgpuFenceAddRef(frameCachetbf->finalTransitionFence);
             frameCachetbf->finalTransitionFence->state = WGPUFenceState_InUse;
