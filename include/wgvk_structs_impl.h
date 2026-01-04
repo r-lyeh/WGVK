@@ -3210,7 +3210,6 @@ static inline VkColorComponentFlags toVulkanColorWriteMask(WGPUColorWriteMask ma
     return ret;
 }
 static inline VkImageViewType toVulkanTextureViewDimension(WGPUTextureViewDimension dim){
-    VkImageViewCreateInfo info;
     switch(dim){
         default:
         case 0:{
@@ -3232,7 +3231,6 @@ static inline VkImageViewType toVulkanTextureViewDimension(WGPUTextureViewDimens
     }
 }
 static inline VkImageType toVulkanTextureDimension(WGPUTextureDimension dim){
-    VkImageViewCreateInfo info;
     switch(dim){
         default:
         case 0:{
@@ -3250,7 +3248,6 @@ static inline VkImageType toVulkanTextureDimension(WGPUTextureDimension dim){
     }
 }
 static inline WGPUTextureDimension fromVulkanTextureDimension(VkImageType dim){
-    VkImageViewCreateInfo info;
     switch(dim){
         default:
             rg_unreachable();

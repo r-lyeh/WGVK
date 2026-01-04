@@ -1143,7 +1143,6 @@ void wgpuTraceLog(int logType, const char *text, ...){
         case WGPU_LOG_FATAL:   strcpy(buffer, TERMCTL_RED "FATAL: "); break;
         default: break;
     }
-    size_t offset_now = strlen(buffer);
     
     unsigned int textSize = (unsigned int)strlen(text);
     memcpy(buffer + strlen(buffer), text, (textSize < (MAX_TRACELOG_MSG_LENGTH - 12))? textSize : (MAX_TRACELOG_MSG_LENGTH - 12));
@@ -2742,6 +2741,10 @@ WGPUBuffer wgpuDeviceCreateBuffer(WGPUDevice device, const WGPUBufferDescriptor*
         requirements.alignment = 256;
     }
     bool ret = wgvkAllocator_alloc(&device->builtinAllocator, &requirements, propertyToFind, &allocation);
+    if(!ret){
+        // out of memory?
+        return NULL;
+    }
     wgpuBuffer->allocationType = AllocationTypeBuiltin;
     wgpuBuffer->builtinAllocation = allocation;
     device->functions.vkBindBufferMemory(device->device, wgpuBuffer->buffer, allocation.pool->chunks[allocation.chunk_index].memory, allocation.offset);
@@ -2857,7 +2860,6 @@ WGPUFuture wgpuBufferMapAsync(WGPUBuffer buffer, WGPUMapMode mode, size_t offset
 
 size_t wgpuBufferGetSize(WGPUBuffer buffer){
     ENTRY();
-    WGPUDevice device = buffer->device;
     switch(buffer->allocationType){
         case AllocationTypeBuiltin:{
             return buffer->builtinAllocation.size;
@@ -2882,28 +2884,6 @@ size_t wgpuBufferGetSize(WGPUBuffer buffer){
 
 void wgpuQueueWriteBuffer(WGPUQueue cSelf, WGPUBuffer buffer, uint64_t bufferOffset, const void* data, size_t size){
     ENTRY();
-    
-    void* mappedMemory = NULL;
-    VkBufferMemoryBarrier bb = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-        .pNext = NULL,
-        .srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .buffer = buffer->buffer,
-        .offset = 0,
-        .size = VK_WHOLE_SIZE,
-    };
-    //cSelf->device->functions.vkCmdPipelineBarrier(
-    //    cSelf->presubmitCache->buffer,
-    //    VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-    //    VK_PIPELINE_STAGE_TRANSFER_BIT,
-    //    0,
-    //    0, NULL, 
-    //    1, &bb,
-    //    0, NULL
-    //);
     if(buffer->memoryProperties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT){
         void* mappedMemory = NULL;
         wgpuBufferMap(buffer, WGPUMapMode_Write, bufferOffset, size, &mappedMemory);
@@ -2940,18 +2920,13 @@ void wgpuQueueWriteTexture(WGPUQueue queue, const WGPUTexelCopyTextureInfo* dest
         memcpy(mappedMemory, data, dataSize);
         wgpuBufferUnmap(stagingBuffer);
     }
-    //WGPUCommandEncoder enkoder = wgpuDeviceCreateCommandEncoder(queue->device, NULL);
+
     WGPUTexelCopyBufferInfo source = {
         .buffer = stagingBuffer,
         .layout = *dataLayout
     };
 
     wgpuCommandEncoderCopyBufferToTexture(queue->presubmitCache, &source, destination, writeSize);
-    //WGPUCommandBuffer puffer = wgpuCommandEncoderFinish(enkoder, NULL);
-
-    //wgpuQueueSubmit(queue, 1, &puffer);
-    //wgpuCommandEncoderRelease(enkoder);
-    //wgpuCommandBufferRelease(puffer);
     wgpuBufferRelease(stagingBuffer);
     EXIT();
 }
@@ -2968,14 +2943,18 @@ WGPUFence wgpuDeviceCreateFence(WGPUDevice device){
     fence->wait_cond = wgvk_cond_create(wgvk_locktype_kernel);
     if (!fence->wait_mutex || !fence->wait_cond) {
         // Handle initialization failure
-        if (fence->wait_mutex) wgvk_mutex_destroy(fence->wait_mutex);
-        if (fence->wait_cond) wgvk_cond_destroy(fence->wait_cond);
+        if (fence->wait_mutex){
+            wgvk_mutex_destroy(fence->wait_mutex);
+        }
+        if (fence->wait_cond){
+            wgvk_cond_destroy(fence->wait_cond);
+        }
         RL_FREE(fence);
         return NULL;
     }
 
-    VkFenceCreateInfo createInfo = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     fence->fence = FenceCache_GetFence(&device->fenceCache);
+    
     // The fence starts in a "reset" state, ready to be used.
     atomic_init(&fence->state, WGPUFenceState_Reset);
     return fence;
@@ -3311,7 +3290,7 @@ void wgpuWriteBindGroup(WGPUDevice device, WGPUBindGroup wvBindGroup, const WGPU
         writes.data[i].dstBinding = binding;
         writes.data[i].dstSet = wvBindGroup->set;
         const WGPUBindGroupLayoutEntry* entryi = &bgdesc->layout->entries[i];
-        const VkDescriptorType entryType = extractVkDescriptorType(bgdesc->layout->entries + i);
+        const VkDescriptorType entryType = extractVkDescriptorType(entryi);
         writes.data[i].descriptorType = entryType;
         writes.data[i].descriptorCount = 1;
         switch(entryType){
@@ -3409,14 +3388,13 @@ WGPUBindGroup wgpuDeviceCreateBindGroup(WGPUDevice device, const WGPUBindGroupDe
         dpci.maxSets = 1;
         device->functions.vkCreateDescriptorPool(device->device, &dpci, NULL, &ret->pool);
 
-        //VkCopyDescriptorSet copy{};
-        //copy.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
+        const VkDescriptorSetAllocateInfo dsai = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = ret->pool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = (VkDescriptorSetLayout*)&bgdesc->layout->layout
+        };
 
-        VkDescriptorSetAllocateInfo dsai zeroinit;
-        dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        dsai.descriptorPool = ret->pool;
-        dsai.descriptorSetCount = 1;
-        dsai.pSetLayouts = (VkDescriptorSetLayout*)&bgdesc->layout->layout;
         device->functions.vkAllocateDescriptorSets(device->device, &dsai, &ret->set);
     }
     else{
@@ -3434,8 +3412,8 @@ WGPUBindGroup wgpuDeviceCreateBindGroup(WGPUDevice device, const WGPUBindGroupDe
     ret->layout = bgdesc->layout;
     ++ret->layout->refCount;
     wgvk_assert(ret->layout != NULL, "ret->layout is NULL");
-    return ret;
     EXIT();
+    return ret;
 }
 
 
@@ -3489,8 +3467,8 @@ WGPUBindGroupLayout wgpuDeviceCreateBindGroupLayout(WGPUDevice device, const WGP
 
     VkDescriptorSetLayoutBindingVector_free(&vkBindings);
     
-    return ret;
     EXIT();
+    return ret;
 }
 void wgpuPipelineLayoutRelease(WGPUPipelineLayout pllayout){
     ENTRY();
@@ -4013,7 +3991,7 @@ WGPURenderPassEncoder wgpuCommandEncoderBeginRenderPass(WGPUCommandEncoder enc, 
     WGPURenderPassEncoder ret = RL_CALLOC(1, sizeof(WGPURenderPassEncoderImpl));
     PerframeCache* frameCache = DeviceGetFIFCache(enc->device, enc->cacheIndex);
     VkCommandPool pool = frameCache->commandPool;
-
+    (void)pool;
     ++enc->encodedCommandCount;
     ret->refCount = 2; //One for WGPURenderPassEncoder the other for the command buffer
     
@@ -4169,31 +4147,7 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
     
     WGPUDevice device = renderPassEncoder->device;
     VkCommandBuffer destination = renderPassEncoder->cmdEncoder->buffer;
-    const size_t bufferSize = RenderPassCommandGenericVector_size(&renderPassEncoder->bufferedCommands);
-
     const RenderPassCommandBegin* beginInfo = &renderPassEncoder->beginInfo;
-
-    
-
-    VkImageView attachmentViews[2 * max_color_attachments + 2] = {0};// = (VkImageView* )RL_CALLOC(frp.allAttachments.size, sizeof(VkImageView) );
-    VkClearValue clearValues   [2 * max_color_attachments + 2] = {0};// = (VkClearValue*)RL_CALLOC(frp.allAttachments.size, sizeof(VkClearValue));
-
-    
-    
-
-    
-    VkRect2D renderPassRect = {
-        .offset = {0, 0},
-        .extent = {
-            beginInfo->colorAttachments[0].view->width, 
-            beginInfo->colorAttachments[0].view->height
-        }
-    };
-
-    
-
-    
-
 
     for(size_t i = 0;i < renderPassEncoder->bufferedCommands.size;i++){
         const RenderPassCommandGeneric* cmd = &renderPassEncoder->bufferedCommands.data[i];
@@ -4209,13 +4163,13 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
                 const WGPUBindGroupLayoutEntry* layoutEntry = &layout->entries[bindingIndex];
 
                 //uniform_type eType = layout->entries[bindingIndex].type;
-                if(layout->entries[bindingIndex].buffer.type != WGPUBufferBindingType_BindingNotUsed){
-                    wgvk_assert(group->entries[bindingIndex].buffer, "Layout indicates buffer but no buffer passed");
+                if(layoutEntry->buffer.type != WGPUBufferBindingType_BindingNotUsed){
+                    wgvk_assert(groupEntry->buffer, "Layout indicates buffer but no buffer passed");
                     WGPUShaderStage visibility = layout->entries[bindingIndex].visibility;
                     wgvk_assert(visibility, "Empty visibility goddamnit");
                     ce_trackBuffer(
                         renderPassEncoder->cmdEncoder,
-                        group->entries[bindingIndex].buffer,
+                        groupEntry->buffer,
                         (BufferUsageSnap){
                             .access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
                             //.access = access_to_vk[layout->entries[bindingIndex].access], //TODO
@@ -4224,15 +4178,15 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
                     );
                 }
 
-                else if(layout->entries[bindingIndex].texture.sampleType != WGPUTextureSampleType_BindingNotUsed){
-                    WGPUShaderStage visibility = layout->entries[bindingIndex].visibility;
+                else if(layoutEntry->texture.sampleType != WGPUTextureSampleType_BindingNotUsed){
+                    WGPUShaderStage visibility = layoutEntry->visibility;
                     wgvk_assert(visibility, "Empty visibility goddamnit");
                     if(visibility == 0){ //TODO: Get rid of this hack
                         visibility = (WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute);
                     }
                     ce_trackTextureView(
                         renderPassEncoder->cmdEncoder,
-                        group->entries[bindingIndex].textureView,
+                        groupEntry->textureView,
                         (ImageUsageSnap){
                             .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                             .access = VK_ACCESS_SHADER_READ_BIT,
@@ -4240,15 +4194,15 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
                         }
                     );
                 }
-                else if(layout->entries[bindingIndex].storageTexture.access != WGPUStorageTextureAccess_BindingNotUsed){
-                    WGPUShaderStage visibility = layout->entries[bindingIndex].visibility;
+                else if(layoutEntry->storageTexture.access != WGPUStorageTextureAccess_BindingNotUsed){
+                    WGPUShaderStage visibility = layoutEntry->visibility;
                     wgvk_assert(visibility, "Empty visibility goddamnit");
                     if(visibility == 0){ //TODO: Get rid of this hack
                         visibility = (WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute);
                     }
                     ce_trackTextureView(
                         renderPassEncoder->cmdEncoder,
-                        group->entries[bindingIndex].textureView,
+                        groupEntry->textureView,
                         (ImageUsageSnap){
                             .layout = VK_IMAGE_LAYOUT_GENERAL,
                             .access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
@@ -4629,7 +4583,11 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
             VkDeviceSize rayGenRegionSize = traceRays->rayMissOffset - traceRays->rayGenerationOffset;    
             VkDeviceSize missRegionSize = traceRays->rayHitOffset - traceRays->rayMissOffset;
             VkDeviceSize hitRegionSize = totalSbtSize - traceRays->rayHitOffset;
-                
+            (void)rayGenRegionSize;
+            (void)missRegionSize;
+            (void)hitRegionSize;
+
+
                 
             const VkStridedDeviceAddressRegionKHR raygenSbtRegion = {
                 .deviceAddress = sbtBaseAddress + traceRays->rayGenerationOffset * handleStride,
@@ -4668,7 +4626,9 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
             WGPURenderBundle bundle = executeRenderBundles->renderBundle;
             DefaultDynamicState ds = destination_->dynamicState;
             VkCommandBuffer* maybeBuffer = DynamicStateCommandBufferMap_get(&bundle->encodedCommandBuffers, ds);
-            VkCommandBuffer executedBuffer;
+            VkCommandBuffer  executedBuffer;
+            (void)maybeBuffer;
+            (void)executedBuffer;
             #if RENDERBUNDLES_AS_SECONDARY_COMMANDBUFFERS == 1
             if(maybeBuffer){
                 executedBuffer = *maybeBuffer;
@@ -4990,6 +4950,7 @@ void generateInterspersedCompatibilityBarriers(WGPUCommandBuffer* buffers, uint3
                 WGPUTexture tex = (WGPUTexture)kvp->key;
                 VkImageLayout srcLayout;
                 VkAccessFlags srcAccess = 0;
+                (void)srcAccess;
                 VkPipelineStageFlags srcStage;
                 ImageUsageRecord* knowledge = ImageUsageRecordMap_get(&referencedImages, tex);
                 if(knowledge){
@@ -5005,6 +4966,7 @@ void generateInterspersedCompatibilityBarriers(WGPUCommandBuffer* buffers, uint3
                 VkImageMemoryBarrier imageBarrier = {
                     .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                     .image = tex->image,
+                    ///TODO: maybe use srcAccess?
                     .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                     .dstAccessMask = kvp->value.initialAccess,
                     .oldLayout = srcLayout,
@@ -5044,6 +5006,8 @@ void generateInterspersedCompatibilityBarriers(WGPUCommandBuffer* buffers, uint3
                 WGPUBuffer buf = (WGPUBuffer)kvp->key;
                 VkAccessFlags srcAccess = 0;
                 VkPipelineStageFlags srcStage;
+                (void)srcAccess;
+                (void)srcStage;
                 BufferUsageRecord* knowledge = BufferUsageRecordMap_get(&referencedBuffers, buf);
                 if(knowledge){
                     srcAccess = knowledge->lastAccess;
@@ -5143,29 +5107,16 @@ static const char* il_string(VkImageLayout layout){
 void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuffer* buffers){
     ENTRY();
 
-    //VkCommandBufferVector submittable;
     WGPUCommandBufferVector submittableWGPU;
-
-    //VkCommandBufferVector_initWithSize(&submittable, commandCount + 1);
-    
     WGPUCommandEncoder pscache = queue->presubmitCache;
     const uint32_t cacheBufferNonEmpty = ((pscache->encodedCommandCount > 0) ? 1 : 0);
     WGPUCommandBufferVector_initWithSize(&submittableWGPU, commandCount + cacheBufferNonEmpty);
-    
-    // LayoutAssumptions_for_each(&pscache->resourceUsage.entryAndFinalLayouts, welldamn_sdfd, NULL);
-    
-    //WGPUCommandBuffer sbuffer = buffers[0];
-    //ImageUsageRecordMap_for_each(&sbuffer->resourceUsage.referencedTextures, registerTransitionCallback, pscache); 
     
     WGPUCommandBufferDescriptor cbd = {
         .label = STRVIEW("PresubmitCache"),
     };
     WGPUCommandBuffer cachebuffer = wgpuCommandEncoderFinish(queue->presubmitCache, &cbd);
     
-    //submittable.data[0] = cachebuffer->buffer;
-    //for(size_t i = 0;i < commandCount;i++){
-    //    submittable.data[i + 1] = buffers[i]->buffer;
-    //}
     if(cacheBufferNonEmpty == 1){
         submittableWGPU.data[0] = cachebuffer;
     }
@@ -5173,8 +5124,6 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
         submittableWGPU.data[i + cacheBufferNonEmpty] = buffers[i];
     }
 
-    
-    
     WGPUFence fence = wgpuDeviceCreateFence(queue->device);
 
 
@@ -5182,7 +5131,6 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
     const uint32_t cacheIndex = frameCount % framesInFlight;
 
     PerframeCache* perFrameCache = DeviceGetFIFCache(queue->device, cacheIndex);
-    
     VkResult submitResult = 0;
     WGPUCommandBufferVector interspersedBuffers;
     WGPUCommandBufferVector_init(&interspersedBuffers);
@@ -5226,10 +5174,10 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
             VkSemaphoreVector_push_back(&waitSemaphores, syncState->acquireImageSemaphore);
             syncState->acquireImageSemaphoreSignalled = false;
         }
-        if(syncState->submits > 0){
-            VkSemaphoreVector_push_back(&waitSemaphores, syncState->semaphores.data[syncState->submits]);
+        const uint32_t submits = syncState->submits;
+        if(submits > 0){
+            VkSemaphoreVector_push_back(&waitSemaphores, syncState->semaphores.data[submits]);
         }
-        uint32_t submits = syncState->submits;
         VkPipelineStageFlags* waitFlags = (VkPipelineStageFlags*)RL_CALLOC(waitSemaphores.size, sizeof(VkPipelineStageFlags));
         for(uint32_t i = 0;i < waitSemaphores.size;i++){
             waitFlags[i] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
@@ -5248,7 +5196,7 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
             .pWaitSemaphores = waitSemaphores.data,
             .pWaitDstStageMask = waitFlags,
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = syncState->semaphores.data + syncState->submits + 1,
+            .pSignalSemaphores = syncState->semaphores.data + submits + 1,
             .pCommandBuffers = finalSubmittable.data,
         };
         if(finalSubmittable.size){
@@ -5276,50 +5224,6 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
         }
         
         RL_FREE(waitFlags);
-    }
-    else{
-        //for(uint32_t i = 0;i < submittable.size;i++){
-        //    VkSemaphoreVector waitSemaphores;
-        //    VkSemaphoreVector_init(&waitSemaphores);
-//
-        //    if(queue->syncState[cacheIndex].acquireImageSemaphoreSignalled){
-        //        VkSemaphoreVector_push_back(&waitSemaphores, queue->syncState[cacheIndex].acquireImageSemaphore);
-        //        queue->syncState[cacheIndex].acquireImageSemaphoreSignalled = false;
-        //    }
-        //    if(queue->syncState[cacheIndex].submits > 0){
-        //        VkSemaphoreVector_push_back(&waitSemaphores, queue->syncState[cacheIndex].semaphores.data[queue->syncState[cacheIndex].submits]);
-        //    }
-//
-        //    uint32_t submits = queue->syncState[cacheIndex].submits;
-        //    
-        //    VkPipelineStageFlags* waitFlags = (VkPipelineStageFlags*)RL_CALLOC(waitSemaphores.size, sizeof(VkPipelineStageFlags));
-        //    for(uint32_t i = 0;i < waitSemaphores.size;i++){
-        //        waitFlags[i] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-        //    }
-//
-        //    const VkSubmitInfo si = {
-        //        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        //        .commandBufferCount = 1,
-        //        .waitSemaphoreCount = waitSemaphores.size,
-        //        .pWaitSemaphores = waitSemaphores.data,
-        //        .pWaitDstStageMask = waitFlags,
-        //        .signalSemaphoreCount = 1,
-        //        .pSignalSemaphores = queue->syncState[cacheIndex].semaphores.data + queue->syncState[cacheIndex].submits + 1,
-        //        .pCommandBuffers = submittable.data + i
-        //    };
-        //    
-//
-        //    ++queue->syncState[cacheIndex].submits;
-//
-        //    WGPUFence submitFence = (i == (submittable.size - 1)) ? fence : NULL;
-        //    submitResult |= queue->device->functions.vkQueueSubmit(queue->graphicsQueue, 1, &si, submitFence ? submitFence->fence : VK_NULL_HANDLE);
-        //    if(submitFence){
-        //        submitFence->state = WGPUFenceState_InUse;
-        //    }
-//
-        //    VkSemaphoreVector_free(&waitSemaphores);
-        //    RL_FREE(waitFlags);
-        //}
     }
 
     if(submitResult == VK_SUCCESS){
@@ -5368,31 +5272,6 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
             wgpuCommandBufferRelease(interspersedBuffers.data[i]);
         }
         WGPUCommandBufferVector_free(&interspersedBuffers);
-        uint32_t cacheIndex = frameCount % framesInFlight;
-        //PendingCommandBufferMap* pcm = &DeviceGetFIFCache(queue->device, cacheIndex)->pendingCommandBuffers;
-        //WGPUCommandBufferVector* fence_iterator = PendingCommandBufferMap_get(pcm, (void*)fence);
-        ////auto it = queue->pendingCommandBuffers[frameCount % framesInFlight].find(fence);
-        //if(fence_iterator == NULL){
-        //    WGPUCommandBufferVector insert;
-        //    WGPUCommandBufferVector_init(&insert);
-        //    PendingCommandBufferMap_put(pcm, (void*)fence, insert);
-        //    fence_iterator = PendingCommandBufferMap_get(pcm, (void*)fence);
-        //    PendingCommandBufferListRef* ud = RL_CALLOC(1, sizeof(PendingCommandBufferListRef));
-        //    ud->fence = fence;
-        //    ud->map = pcm;
-        //    
-        //    CallbackWithUserdataVector_push_back(&fence->callbacksOnWaitComplete, (CallbackWithUserdata){
-        //        .callback = releaseCommandBuffersDependingOnFence,
-        //        .userdata = ud,
-        //        .freeUserData = free
-        //    });
-        //    wgvk_assert(fence_iterator != NULL, "Something is wrong with the hash set");
-        //    WGPUCommandBufferVector_init(fence_iterator);
-        //}
-        //for(size_t i = 0;i < insert.size;i++){
-        //    WGPUCommandBufferVector_push_back(fence_iterator, insert.data[i]);
-        //}
-        //WGPUCommandBufferVector_free(&insert);
     }else{
         DeviceCallback(queue->device, WGPUErrorType_Internal, STRVIEW("vkQueueSubmit failed"));
     }
@@ -5400,7 +5279,6 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
     wgpuCommandBufferRelease(cachebuffer);
     WGPUCommandEncoderDescriptor cedesc zeroinit;
     queue->presubmitCache = wgpuDeviceCreateCommandEncoder(queue->device, &cedesc);
-    //VkCommandBufferVector_free(&submittable);
     WGPUCommandBufferVector_free(&submittableWGPU);
     EXIT();
 }
@@ -5975,8 +5853,7 @@ void wgpuCommandBufferRelease(WGPUCommandBuffer commandBuffer) {
         WGPURaytracingPassEncoderSet_free(&commandBuffer->referencedRTs);
         
         PerframeCache* frameCache = DeviceGetFIFCache(commandBuffer->device, commandBuffer->cacheIndex);
-        device->functions.vkFreeCommandBuffers(device->device, device->fifCache.frameCaches[commandBuffer->cacheIndex].commandPool, 1, &commandBuffer->buffer);
-        //VkCommandBufferVector_push_back(&frameCache->commandBuffers, commandBuffer->buffer);
+        device->functions.vkFreeCommandBuffers(device->device, frameCache->commandPool, 1, &commandBuffer->buffer);
         if(commandBuffer->label.data){
             WGPUStringFree(commandBuffer->label);
         }
@@ -6228,7 +6105,7 @@ void wgpuQueueRelease                         (WGPUQueue queue){
 }
 
 
-
+static inline uint32_t std_min_u32_(uint32_t    a, uint32_t    b) {return a < b ? a : b;}
 WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, const WGPUComputePipelineDescriptor* descriptor){
     ENTRY();
     WGPUComputePipeline ret = RL_CALLOC(1, sizeof(WGPUComputePipelineImpl));
@@ -6236,9 +6113,9 @@ WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, const WGP
     ret->refCount = 1;
 
     char namebuffer[512];
-    wgvk_assert(descriptor->compute.entryPoint.length < 511, "griiindumehaue");
-    memcpy(namebuffer, descriptor->compute.entryPoint.data, descriptor->compute.entryPoint.length);
-    namebuffer[descriptor->compute.entryPoint.length] = 0;
+    wgvk_assert(descriptor->compute.entryPoint.length < 511, "entryPoint name of the compute stage too long");
+    memcpy(namebuffer, descriptor->compute.entryPoint.data, std_min_u32_(511, descriptor->compute.entryPoint.length));
+    namebuffer[std_min_u32_(511, descriptor->compute.entryPoint.length)] = 0;
     
     VkShaderModule vkModule = VK_NULL_HANDLE;
     if(descriptor->compute.module->vulkanModuleMultiEP){
@@ -6288,16 +6165,13 @@ WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, const WGP
 
 WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice device, const WGPURenderPipelineDescriptor* descriptor) {
     ENTRY();
-    WGPUDeviceImpl* deviceImpl = (WGPUDeviceImpl*)(device);
     WGPUPipelineLayout pl_layout = descriptor->layout;
 
     VkPipelineShaderStageCreateInfo shaderStages[16] = {
         (VkPipelineShaderStageCreateInfo){0}
     };
     uint32_t shaderStageInsertPos = 0;
-    char nullTerminatedEntryPoints[16][64] = {0};
-
-    const char* a = nullTerminatedEntryPoints[15];
+    
     // Vertex Stage
     VkPipelineShaderStageCreateInfo vertShaderStageInfo zeroinit;
     vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -7142,14 +7016,13 @@ void wgpuRaytracingPassEncoderEnd(WGPURaytracingPassEncoder rtPassEncoder){
                 const WGPUBindGroupEntry*       groupEntry  = &group ->entries[bindingIndex];
                 const WGPUBindGroupLayoutEntry* layoutEntry = &layout->entries[bindingIndex];
 
-                //uniform_type eType = layout->entries[bindingIndex].type;
-                if(layout->entries[bindingIndex].buffer.type != WGPUBufferBindingType_BindingNotUsed){
+                if(layoutEntry->buffer.type != WGPUBufferBindingType_BindingNotUsed){
                     wgvk_assert(group->entries[bindingIndex].buffer, "Layout indicates buffer but no buffer passed");
-                    WGPUShaderStage visibility = layout->entries[bindingIndex].visibility;
+                    WGPUShaderStage visibility = layoutEntry->visibility;
                     wgvk_assert(visibility, "Empty visibility goddamnit");
                     ce_trackBuffer(
                         rtPassEncoder->cmdEncoder,
-                        group->entries[bindingIndex].buffer,
+                        groupEntry->buffer,
                         (BufferUsageSnap){
                             .access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
                             //.access = access_to_vk[layout->entries[bindingIndex].access], //TODO
@@ -7158,15 +7031,15 @@ void wgpuRaytracingPassEncoderEnd(WGPURaytracingPassEncoder rtPassEncoder){
                     );
                 }
 
-                else if(layout->entries[bindingIndex].texture.sampleType != WGPUTextureSampleType_BindingNotUsed){
-                    WGPUShaderStage visibility = layout->entries[bindingIndex].visibility;
+                else if(layoutEntry->texture.sampleType != WGPUTextureSampleType_BindingNotUsed){
+                    WGPUShaderStage visibility = layoutEntry->visibility;
                     wgvk_assert(visibility, "Empty visibility goddamnit");
                     if(visibility == 0){ //TODO: Get rid of this hack
                         visibility = (WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute);
                     }
                     ce_trackTextureView(
                         rtPassEncoder->cmdEncoder,
-                        group->entries[bindingIndex].textureView,
+                        groupEntry->textureView,
                         (ImageUsageSnap){
                             .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                             .access = VK_ACCESS_SHADER_READ_BIT,
@@ -7174,15 +7047,15 @@ void wgpuRaytracingPassEncoderEnd(WGPURaytracingPassEncoder rtPassEncoder){
                         }
                     );
                 }
-                else if(layout->entries[bindingIndex].storageTexture.access != WGPUStorageTextureAccess_BindingNotUsed){
-                    WGPUShaderStage visibility = layout->entries[bindingIndex].visibility;
+                else if(layoutEntry->storageTexture.access != WGPUStorageTextureAccess_BindingNotUsed){
+                    WGPUShaderStage visibility = layoutEntry->visibility;
                     wgvk_assert(visibility, "Empty visibility goddamnit");
                     if(visibility == 0){ //TODO: Get rid of this hack
                         visibility = (WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute);
                     }
                     ce_trackTextureView(
                         rtPassEncoder->cmdEncoder,
-                        group->entries[bindingIndex].textureView,
+                        groupEntry->textureView,
                         (ImageUsageSnap){
                             .layout = VK_IMAGE_LAYOUT_GENERAL,
                             .access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
@@ -7224,9 +7097,6 @@ void resetFenceAndReleaseBuffers(void* fence_, WGPUCommandBufferVector* cBuffers
                 }
             }
         }
-        if(cBuffers->data[i]->label.data){
-            volatile int x = 3;
-        }
         wgpuCommandBufferRelease(cBuffers->data[i]);
     }
     WGPUCommandBufferVector_free(cBuffers);
@@ -7240,7 +7110,7 @@ void wgpuSurfaceGetCurrentTexture(WGPUSurface surface, WGPUSurfaceTexture* surfa
     wgvk_assert(surface->device, "surface->device must be nonnull");
     
     const size_t submittedframes = surface->device->submittedFrames;
-    const uint32_t cacheIndex = surface->device->submittedFrames % framesInFlight;
+    const uint32_t cacheIndex = submittedframes % framesInFlight;
     SyncState* syncState = DeviceGetSyncState(surface->device, cacheIndex);
     if(surface->swapchain){
         VkResult acquireResult = surface->device->functions.vkAcquireNextImageKHR(
@@ -7451,8 +7321,7 @@ void wgpuDeviceTick(WGPUDevice device){
     PerframeCache* frameCacheMew = DeviceGetFIFCache(device, cacheIndex);
     PendingCommandBufferMap* pcmNew = &frameCacheMew->pendingCommandBuffers;
     SyncState* syncStateNew = &frameCacheMew->syncState;
-    size_t pcmSize = pcmNew->current_size;
-
+    
     WGPUFenceVector fences;
     WGPUFenceVector_init(&fences);
 
@@ -7486,11 +7355,11 @@ void wgpuDeviceTick(WGPUDevice device){
     WGPUBufferVector_clear(usedBuffers);//(WGPUBufferVector *dest, const WGPUBufferVector *source)
     
 
-    VkCommandPool poolToClear = frameCacheMew->commandPool;
-
-    // This line is currently commented out because they cause an 
+    
+    // These lines is currently commented out because they cause an 
     // issue with CommandEncoders living across wgpuDeviceTick (and wgpuSurfacePresent) calls
     //
+    // VkCommandPool poolToClear = frameCacheMew->commandPool;
     // device->functions.vkResetCommandPool(device->device, poolToClear, 0);
 
     for(size_t i = 0;i < pcmNew->current_capacity;i++){
@@ -7532,8 +7401,12 @@ WGPUSampler wgpuDeviceCreateSampler(WGPUDevice device, const WGPUSamplerDescript
         .minFilter = ((descriptor->minFilter == WGPUFilterMode_Linear) ? VK_FILTER_LINEAR : VK_FILTER_NEAREST),
     };
     VkResult result = device->functions.vkCreateSampler(device->device, &sci, NULL, &(ret->sampler));
-    return ret;
+    if(result != VK_SUCCESS){
+        RL_FREE(ret);
+        return NULL;
+    }
     EXIT();
+    return ret;
 }
 void wgpuRenderPassEncoderSetVertexBuffer(WGPURenderPassEncoder rpe, uint32_t binding, WGPUBuffer buffer, size_t offset, uint64_t size) {
     ENTRY();
@@ -8411,11 +8284,11 @@ static void wgpuShaderModuleGetReflectionInfo_sync(void* userdata_){
                 
                 for(uint32_t i = 0;i < input_var_count;i++){
                     SpvReflectInterfaceVariable* input_var_i = input_vars[i];
-                    input_attribute_info.attributes[i] = spvReflectToWGPUReflectAttrib(input_vars[i]);
+                    input_attribute_info.attributes[i] = spvReflectToWGPUReflectAttrib(input_var_i);
                 }
                 for(uint32_t i = 0;i < output_var_count;i++){
                     SpvReflectInterfaceVariable* output_var_i = output_vars[i];
-                    output_attribute_info.attributes[i] = spvReflectToWGPUReflectAttrib(output_vars[i]);
+                    output_attribute_info.attributes[i] = spvReflectToWGPUReflectAttrib(output_var_i);
                 }
 
                 reflectionInfo.inputAttributes = &input_attribute_info;
@@ -8642,7 +8515,6 @@ WGPUStatus wgpuAdapterGetInfo(WGPUAdapter adapter, WGPUAdapterInfo* info) {
     }
 
     const VkPhysicalDeviceProperties*       deviceProps = &adapter->deviceInfoCache.properties.properties;
-    const VkPhysicalDeviceDriverProperties* driverProps = &adapter->deviceInfoCache.driverProperties;
 
     info->vendorID = adapter->deviceInfoCache.properties.properties.vendorID;
     info->deviceID = adapter->deviceInfoCache.properties.properties.deviceID;
@@ -8660,6 +8532,7 @@ WGPUStatus wgpuAdapterGetInfo(WGPUAdapter adapter, WGPUAdapterInfo* info) {
         .data = PhysicalDeviceArchitecture_ToString(GetArchitecture(deviceProps->vendorID, deviceProps->deviceID)),
     };
 
+
     // Map the Vulkan device type to the corresponding WGPU adapter type.
     switch (deviceProps->deviceType) {
         case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: info->adapterType = WGPUAdapterType_IntegratedGPU; break;
@@ -8668,8 +8541,8 @@ WGPUStatus wgpuAdapterGetInfo(WGPUAdapter adapter, WGPUAdapterInfo* info) {
         default:                                     info->adapterType = WGPUAdapterType_Unknown;       break;
     }
 
-    EXIT();
     return WGPUStatus_Success;
+    EXIT();
 }
 
 WGPUBool wgpuAdapterHasFeature(WGPUAdapter adapter, WGPUFeatureName feature) {
@@ -9158,6 +9031,8 @@ static void wgpuDeviceCreateRenderPipelineAsync_wait(void* _crps){
     CreateRenderPipelineAsyncState* crps = (CreateRenderPipelineAsyncState*)_crps;
     do{
         volatile int x = 0;
+        (void)x;
+        ///TODO: Idiomatic lock wait
     }while(atomic_load_explicit(&crps->completed, memory_order_acquire) == 0);
     if(crps->callbackInfo.mode == WGPUCallbackMode_WaitAnyOnly){
         if(crps->renderPipeline){
@@ -9177,10 +9052,8 @@ WGPUFuture wgpuDeviceCreateRenderPipelineAsync(WGPUDevice device, const WGPURend
     crps->completed = 0;
     crps->device = device;
     crps->rpdesc = copyRenderPipelineDescriptor(descriptor);
-    //if(callbackInfo.mode == WGPUCallbackMode_AllowSpontaneous){
     wgvk_thread_create(&crps->thread, wgpuDeviceCreateRenderPipelineAsync_sync, (void*)crps);
-    //}
-
+    
     WGPUFutureImpl* futureImpl = RL_CALLOC(1, sizeof(WGPUFutureImpl));
     futureImpl->freeUserData = RL_FREE;
 
@@ -9194,10 +9067,10 @@ void wgpuDeviceDestroy(WGPUDevice device) {
     ENTRY();
     EXIT();
 }
-void wgpuDeviceGetFeatures(WGPUDevice device, WGPUSupportedFeatures * features) {
-     ENTRY();
+void wgpuDeviceGetFeatures(WGPUDevice device, WGPUSupportedFeatures* features) {
+    ENTRY();
 
-     EXIT();
+    EXIT();
 }
 WGPUStatus wgpuDeviceGetLimits(WGPUDevice device, WGPULimits * limits) {
     ENTRY();
@@ -11179,14 +11052,6 @@ void wgpuRaytracingPassEncoderSetPipeline     (WGPURaytracingPassEncoder rte, WG
 }
 void wgpuRaytracingPassEncoderSetBindGroup    (WGPURaytracingPassEncoder cpe, uint32_t groupIndex, WGPUBindGroup bindGroup, uint32_t dynamicOffsetCount, const uint32_t* dynamicOffsets){
     ENTRY();
-    RenderPassCommandSetBindGroup setBindGroup = {
-        .groupIndex = groupIndex,
-        .group = bindGroup,
-        .bindPoint = VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-        .dynamicOffsetCount = dynamicOffsetCount,
-        .dynamicOffsets = dynamicOffsets
-    };
-
     RenderPassCommandGeneric cmd = {
         .type = rp_command_type_set_bind_group,
         .setBindGroup = {
