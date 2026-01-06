@@ -4148,6 +4148,15 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
     WGPUDevice device = renderPassEncoder->device;
     VkCommandBuffer destination = renderPassEncoder->cmdEncoder->buffer;
     const RenderPassCommandBegin* beginInfo = &renderPassEncoder->beginInfo;
+    VkImageView attachmentViews[2 * max_color_attachments + 2] = {0};// = (VkImageView* )RL_CALLOC(frp.allAttachments.size, sizeof(VkImageView) );
+    VkClearValue clearValues   [2 * max_color_attachments + 2] = {0};// = (VkClearValue*)RL_CALLOC(frp.allAttachments.size, sizeof(VkClearValue));
+    VkRect2D renderPassRect = {
+        .offset = {0, 0},
+        .extent = {
+            beginInfo->colorAttachments[0].view->width, 
+            beginInfo->colorAttachments[0].view->height
+        }
+    };
 
     for(size_t i = 0;i < renderPassEncoder->bufferedCommands.size;i++){
         const RenderPassCommandGeneric* cmd = &renderPassEncoder->bufferedCommands.data[i];
@@ -4260,7 +4269,11 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
     };
     device->functions.vkCmdBeginRenderPass(destination, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
     #else
-    
+
+    (void)attachmentViews;
+    (void)clearValues;
+    (void)renderPassRect;
+
     VkRenderingAttachmentInfo colorAttachments[max_color_attachments] zeroinit;
     for(uint32_t i = 0;i < beginInfo->colorAttachmentCount;i++){
         colorAttachments[i].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -4578,7 +4591,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
 
             char groupDump_[32 * 3] = {0};
             void* groupDump = groupDump_;
-            device->functions.vkGetRayTracingShaderGroupHandlesKHR(device->device, pipeline->raytracingPipeline, 0, 3, 32 * 3, groupDump);
+            device->functions.vkGetRayTracingShaderGroupHandlesKHR(device->device, pipeline->raytracingPipeline, 0, 3, (size_t)32 * 3, groupDump);
 
             VkDeviceSize rayGenRegionSize = traceRays->rayMissOffset - traceRays->rayGenerationOffset;    
             VkDeviceSize missRegionSize = traceRays->rayHitOffset - traceRays->rayMissOffset;
@@ -6088,6 +6101,15 @@ void wgpuDeviceRelease(WGPUDevice device){
         
         wgpuQueueRelease(device->queue);
         wgpuAdapterRelease(device->adapter);
+
+        for(size_t i = 0;i < device->renderPassCache.current_capacity;i++){
+            RenderPassCache_kv_pair* it = device->renderPassCache.table + i;
+            if(it->key.colorAttachments[0].format != VK_FORMAT_UNDEFINED){
+                VkAttachmentDescriptionVector_free(&it->value.allAttachments);
+                device->functions.vkDestroyRenderPass(device->device, it->value.renderPass, NULL);
+            }
+        }
+
         device->functions.vkDestroyDevice(device->device, NULL);
         
         // Still a lot to do
@@ -9718,7 +9740,7 @@ static VkResult wgvkDeviceMemoryPool_create_chunk(WgvkDeviceMemoryPool* pool, si
 
     VkMemoryAllocateFlagsInfo flagsInfo = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
-        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
+        //.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
     };
 
     VkMemoryAllocateInfo allocInfo = {
