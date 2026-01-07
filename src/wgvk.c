@@ -498,7 +498,6 @@ WGPUSurface wgpuInstanceCreateSurface(WGPUInstance instance, const WGPUSurfaceDe
             case WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector:
                 doSurfaceCreation(instance, ret, head);
                 wgvk_assert(ret->surface, "ret->surface is null");
-                fprintf(stderr, "Ret surface: %p\n", ret->surface);
                 surfaceCreated = 1;
             break;
             case WGPUSType_SurfaceColorManagement: {
