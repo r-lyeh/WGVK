@@ -893,8 +893,8 @@ void FIFCache_destroy(FIFCache* fcache){
             if(cache->bindGroupCache.table[bgc].key != PHM_EMPTY_SLOT_KEY && cache->bindGroupCache.table[bgc].key != PHM_DELETED_SLOT_KEY){
                 DescriptorSetAndPoolVector* dspv = &cache->bindGroupCache.table[bgc].value;
                 for(size_t vi = 0;vi < dspv->size;vi++){
-                    //device->functions.vkFreeDescriptorSets(device->device, dspv->data[i].pool, 1, &dspv->data[i].set);
-                    device->functions.vkDestroyDescriptorPool(device->device, dspv->data[i].pool, NULL);
+                    const VkDescriptorPool poolToFree = dspv->data[vi].pool;
+                    device->functions.vkDestroyDescriptorPool(device->device, poolToFree, NULL);
                 }
                 DescriptorSetAndPoolVector_free(dspv);
             }
@@ -1179,6 +1179,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     VkDebugUtilsMessageTypeFlagsEXT messageType,
     const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
     void* pUserData) {
+    //return VK_FALSE;
     if(messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT){
         wgpuTraceLog(WGPU_LOG_ERROR, pCallbackData->pMessage);
         rg_trap();
@@ -2716,36 +2717,38 @@ WGPUBuffer wgpuDeviceCreateBuffer(WGPUDevice device, const WGPUBufferDescriptor*
     }
 
     #if USE_VMA_ALLOCATOR == 1
-    VmaAllocationCreateInfo vallocInfo = {
-        .preferredFlags = propertyToFind,
-    };
-    VmaAllocation allocation zeroinit;
-    VmaAllocationInfo allocationInfo zeroinit;
-    VkResult vmabufferCreateResult = vmaCreateBuffer(device->allocator, &bufferDesc, &vallocInfo, &wgpuBuffer->buffer, &allocation, &allocationInfo);
-
-    if(vmabufferCreateResult != VK_SUCCESS){
-        DeviceCallback(device, WGPUErrorType_OutOfMemory, STRVIEW("Failed to create allocator"));
-        TRACELOG(WGPU_LOG_ERROR, "Could not allocate buffer: %s", vkErrorString(vmabufferCreateResult));
-        RL_FREE(wgpuBuffer);
-        return NULL;
-    }
-    wgpuBuffer->vmaAllocation = allocation;
-    wgpuBuffer->allocationType = AllocationTypeVMA;
+        VmaAllocationCreateInfo vallocInfo = {
+            .preferredFlags = propertyToFind,
+        };
+        VmaAllocation allocation zeroinit;
+        VmaAllocationInfo allocationInfo zeroinit;
+        VkResult vmabufferCreateResult = vmaCreateBuffer(device->allocator, &bufferDesc, &vallocInfo, &wgpuBuffer->buffer, &allocation, &allocationInfo);
+        if(vmabufferCreateResult != VK_SUCCESS){
+            DeviceCallback(device, WGPUErrorType_OutOfMemory, STRVIEW("Failed to create allocator"));
+            TRACELOG(WGPU_LOG_ERROR, "Could not allocate buffer: %s", vkErrorString(vmabufferCreateResult));
+            RL_FREE(wgpuBuffer);
+            return NULL;
+        }
+        wgpuBuffer->vmaAllocation = allocation;
+        wgpuBuffer->allocationType = AllocationTypeVMA;
     #else
-    device->functions.vkCreateBuffer(device->device, &bufferDesc, NULL, &wgpuBuffer->buffer);
-    wgvkAllocation allocation = {0};
-    VkMemoryRequirements requirements = {0};
-    device->functions.vkGetBufferMemoryRequirements(device->device, wgpuBuffer->buffer, &requirements);
-    if(desc->usage & WGPUBufferUsage_Raytracing){
-        requirements.alignment = 256;
-    }
-    bool ret = wgvkAllocator_alloc(&device->builtinAllocator, &requirements, propertyToFind, &allocation);
-    if(!ret){
-        // out of memory?
-        return NULL;
-    }
-    wgpuBuffer->allocationType = AllocationTypeBuiltin;
-    wgpuBuffer->builtinAllocation = allocation;
+        device->functions.vkCreateBuffer(device->device, &bufferDesc, NULL, &wgpuBuffer->buffer);
+        wgvkAllocation allocation = {0};
+        VkMemoryRequirements requirements = {0};
+        device->functions.vkGetBufferMemoryRequirements(device->device, wgpuBuffer->buffer, &requirements);
+        if(desc->usage & WGPUBufferUsage_Raytracing){
+            requirements.alignment = 256;
+        }
+        bool ret = wgvkAllocator_alloc(&device->builtinAllocator, &requirements, propertyToFind, &allocation);
+        if(!ret){
+            // out of memory
+            char errorString[1024] = {0};
+            snprintf(errorString, sizeof(errorString), "Failed to create buffer of size %zu", desc->size);
+            DeviceCallback(device, WGPUErrorType_OutOfMemory, (WGPUStringView){errorString, strlen(errorString)});
+            return NULL;
+        }
+        wgpuBuffer->allocationType = AllocationTypeBuiltin;
+        wgpuBuffer->builtinAllocation = allocation;
     device->functions.vkBindBufferMemory(device->device, wgpuBuffer->buffer, allocation.pool->chunks[allocation.chunk_index].memory, allocation.offset);
     #endif
     wgpuBuffer->memoryProperties = propertyToFind;
@@ -4110,7 +4113,7 @@ WGPURenderPassEncoder wgpuCommandEncoderBeginRenderPass(WGPUCommandEncoder enc, 
     const ImageUsageSnap iur_depth = {
         .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         .access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-        .stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
         .subresource = {
             .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
             .baseMipLevel = 0,
@@ -6079,6 +6082,9 @@ void resetFenceAndReleaseBuffers(void* fence_, WGPUCommandBufferVector* cBuffers
 void wgpuDeviceRelease(WGPUDevice device){
     ENTRY();
     if(--device->refCount == 0){
+        for(uint32_t i = 0;i < framesInFlight;i++){
+            wgpuDeviceTick(device);
+        }
         WGPUCommandBufferDescriptor cbd = {
             .label = STRVIEW("PresubmitCache"),
         };
