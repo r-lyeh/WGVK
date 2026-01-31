@@ -83,6 +83,14 @@ For a quick test without dependencies, you can compile a basic example directly 
 gcc examples/basic_compute.c src/wgvk.c -O3 -I include -o basic_compute
 ```
 
+Or, if you are building with Visual Studio:
+
+```bash
+cl examples\basic_compute.c src\wgvk.c -O2 -DNDEBUG -I include /std:c11 /experimental:c11atomics
+cl examples\rgfw_surface.c src\wgvk.c -O2 -DNDEBUG -I include /std:c11 /experimental:c11atomics
+```
+
+
 ## Examples
 
 The `examples/` directory contains sample code to get you started:

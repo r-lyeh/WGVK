@@ -1072,7 +1072,7 @@ LayoutedRenderPass LoadRenderPassFromLayout(WGPUDevice device, RenderPassLayout 
 
 
     // Assign depth attachment if present.
-    VkAttachmentReference depthRef = {};
+    VkAttachmentReference depthRef = {0};
     if (depthAttachmentIndex != VK_ATTACHMENT_UNUSED) {
         depthRef.attachment = depthAttachmentIndex;
         depthRef.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -1081,7 +1081,7 @@ LayoutedRenderPass LoadRenderPassFromLayout(WGPUDevice device, RenderPassLayout 
         subpass.pDepthStencilAttachment = NULL;
     }
 
-    VkAttachmentReference resolveRef = {};
+    VkAttachmentReference resolveRef = {0};
     if (colorResolveIndex != VK_ATTACHMENT_UNUSED) {
         resolveRef.attachment = colorResolveIndex;
         resolveRef.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -1285,7 +1285,7 @@ WGPUInstance wgpuCreateInstance(const WGPUInstanceDescriptor* descriptor) {
         return NULL;
     }
 
-    int needsPortabilityEnumeration = 1;
+    int needsPortabilityEnumeration = 0;
     #ifdef __APPLE__    
     needsPortabilityEnumeration = 1;
     #endif
@@ -3637,6 +3637,7 @@ static inline VkComponentSwizzle toVkSwizzleComponent(WGPUComponentSwizzle wgpuS
         case WGPUComponentSwizzle_A: return VK_COMPONENT_SWIZZLE_A;
         case WGPUComponentSwizzle_Undefined:
         case WGPUComponentSwizzle_Force32:
+        default:
         rg_unreachable();
         wgvk_assert(false, "Invalid enum passed");
         abort();

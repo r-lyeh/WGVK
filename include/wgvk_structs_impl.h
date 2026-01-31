@@ -39,11 +39,11 @@
 #if defined(_MSC_VER) || defined(_MSC_FULL_VER) 
     #define rg_unreachable(...) __assume(false)
     #define rg_assume(Condition) __assume(Condition)
-    #define rg_trap(...) __debugbreak();
+    #define rg_trap(...) __debugbreak()
 #else 
     #define rg_unreachable(...) __builtin_unreachable()
     #define rg_assume(Condition) __builtin_assume(Condition)
-    #define rg_trap(...) __builtin_trap();
+    #define rg_trap(...) __builtin_trap()
 #endif
 
 #define rg_countof(X) (sizeof(X) / sizeof((X)[0]))
@@ -3388,6 +3388,7 @@ static inline VkSamplerAddressMode toVulkanAddressMode(WGPUAddressMode mode){
         case WGPUAddressMode_MirrorRepeat: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
         case WGPUAddressMode_Undefined:
         case WGPUAddressMode_Force32:
+        default:
         rg_unreachable();
         return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE; 
     }
@@ -3656,6 +3657,7 @@ static inline VkPrimitiveTopology toVulkanPrimitiveTopology(WGPUPrimitiveTopolog
         case WGPUPrimitiveTopology_TriangleStrip: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
         case WGPUPrimitiveTopology_Undefined:
         case WGPUPrimitiveTopology_Force32:
+        default:
         rg_unreachable();
         return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
     }
@@ -4013,6 +4015,7 @@ static inline VkDescriptorType extractVkDescriptorType(const WGPUBindGroupLayout
         return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     }
     rg_trap();
+    return (VkDescriptorType)(-1);
 }
 
 static inline VkAccessFlags extractVkAccessFlags(const WGPUBindGroupLayoutEntry* entry){
@@ -4035,6 +4038,7 @@ static inline VkAccessFlags extractVkAccessFlags(const WGPUBindGroupLayoutEntry*
         return 0;
     }
     rg_trap();
+    return 0;
 }
 
 
