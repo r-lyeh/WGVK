@@ -363,12 +363,13 @@ int main(){
     };
     wgpuInstanceWaitAny(instance, 1, &requestDeviceFutureWaitInfo, ~0ull);
 
+    int width = 1280, height = 720;
+
     WGPUQueue queue = wgpuDeviceGetQueue(device);
-    RGFW_window* window = RGFW_createWindow("RGFW with WebGPU", (RGFW_rect){0,0,1280,720}, 0);
+    RGFW_window* window = RGFW_createWindow("RGFW with WebGPU", (RGFW_rect){0,0,width,height}, 0);
 
     WGPUSurface surface = RGFW_window_createSurface_WebGPU(window, instance);
 
-    int width, height;
     WGPUSurfaceCapabilities caps = {0};
     wgpuSurfaceGetCapabilities(surface, requestedAdapter, &caps);
 
