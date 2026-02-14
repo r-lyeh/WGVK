@@ -900,6 +900,7 @@ TEST_F(WebGPUTest, RenderPassTriangleDraw) {
     wgpuShaderModuleRelease(fsModule);
 }
 
+#if SUPPORT_WGSL == 1
 TEST_F(WebGPUTest, WGSLShaderWithOverrideAndTextureSample) {
     // Same shader as basic_wgsl_shader example
     const char* wgslSource =
@@ -1239,6 +1240,7 @@ TEST_F(WebGPUTest, WGSLShaderWithOverrideAndTextureSample) {
     wgpuSamplerRelease(sampler);
     wgpuShaderModuleRelease(shaderModule);
 }
+#endif
 
 TEST_F(WebGPUTest, LimitsGetAndSet) {
     // Get limits from adapter
