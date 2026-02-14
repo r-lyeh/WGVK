@@ -900,6 +900,346 @@ TEST_F(WebGPUTest, RenderPassTriangleDraw) {
     wgpuShaderModuleRelease(fsModule);
 }
 
+TEST_F(WebGPUTest, WGSLShaderWithOverrideAndTextureSample) {
+    // Same shader as basic_wgsl_shader example
+    const char* wgslSource =
+        "override brightness = 0.0;\n"
+        "struct VertexInput {\n"
+        "    @location(0) position: vec2f,\n"
+        "    @location(1) uv: vec2f\n"
+        "};\n"
+        "\n"
+        "struct VertexOutput {\n"
+        "    @builtin(position) position: vec4f,\n"
+        "    @location(0) uv: vec2f\n"
+        "};\n"
+        "\n"
+        "@vertex\n"
+        "fn vs_main(in: VertexInput) -> VertexOutput {\n"
+        "    var out: VertexOutput;\n"
+        "    out.position = vec4f(in.position.x, in.position.y, 0.0f, 1.0f);\n"
+        "    out.uv = in.uv;\n"
+        "    return out;\n"
+        "}\n"
+        "\n"
+        "@group(0) @binding(0) var colDiffuse: texture_2d<f32>;\n"
+        "@group(0) @binding(1) var grsampler: sampler;\n"
+        "\n"
+        "@fragment\n"
+        "fn fs_main(in: VertexOutput) -> @location(0) vec4f {\n"
+        "    return textureSample(colDiffuse, grsampler, in.uv) * brightness;\n"
+        "}\n";
+
+    const uint32_t width = 64;
+    const uint32_t height = 64;
+    const uint32_t bytesPerRow = 256;
+    const size_t bufferSize = bytesPerRow * height;
+
+    // 1. Create WGSL shader module
+    WGPUShaderSourceWGSL wgslSourceDesc = {};
+    wgslSourceDesc.chain.sType = WGPUSType_ShaderSourceWGSL;
+    wgslSourceDesc.code.data = wgslSource;
+    wgslSourceDesc.code.length = strlen(wgslSource);
+
+    WGPUShaderModuleDescriptor shaderDesc = {};
+    shaderDesc.nextInChain = (WGPUChainedStruct*)&wgslSourceDesc;
+    shaderDesc.label = { "WGSLOverrideShader", 18 };
+
+    WGPUShaderModule shaderModule = wgpuDeviceCreateShaderModule(device, &shaderDesc);
+    ASSERT_NE(shaderModule, nullptr) << "Failed to create WGSL shader module";
+
+    // 2. Create a source texture (10x10 with known data, like the example)
+    WGPUTextureDescriptor srcTexDesc = {};
+    srcTexDesc.size = {10, 10, 1};
+    srcTexDesc.format = WGPUTextureFormat_RGBA8Unorm;
+    srcTexDesc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+    srcTexDesc.mipLevelCount = 1;
+    srcTexDesc.sampleCount = 1;
+    srcTexDesc.dimension = WGPUTextureDimension_2D;
+
+    WGPUTexture srcTexture = wgpuDeviceCreateTexture(device, &srcTexDesc);
+    ASSERT_NE(srcTexture, nullptr);
+
+    // Fill with non-zero data (cycling pattern like the example)
+    std::vector<uint8_t> texData(10 * 10 * 4);
+    for (size_t i = 0; i < texData.size(); i++) {
+        texData[i] = (uint8_t)((i + 1) & 255); // +1 to ensure non-zero
+    }
+
+    WGPUTexelCopyTextureInfo texCopyDst = {};
+    texCopyDst.texture = srcTexture;
+    texCopyDst.aspect = WGPUTextureAspect_All;
+
+    WGPUTexelCopyBufferLayout texDataLayout = {};
+    texDataLayout.bytesPerRow = 10 * 4;
+    texDataLayout.rowsPerImage = 10;
+
+    WGPUExtent3D texWriteSize = {10, 10, 1};
+    wgpuQueueWriteTexture(queue, &texCopyDst, texData.data(), texData.size(), &texDataLayout, &texWriteSize);
+
+    WGPUTextureViewDescriptor srcViewDesc = {};
+    srcViewDesc.format = WGPUTextureFormat_RGBA8Unorm;
+    srcViewDesc.dimension = WGPUTextureViewDimension_2D;
+    srcViewDesc.baseMipLevel = 0;
+    srcViewDesc.mipLevelCount = 1;
+    srcViewDesc.baseArrayLayer = 0;
+    srcViewDesc.arrayLayerCount = 1;
+    srcViewDesc.aspect = WGPUTextureAspect_All;
+    srcViewDesc.usage = WGPUTextureUsage_TextureBinding;
+
+    WGPUTextureView srcTextureView = wgpuTextureCreateView(srcTexture, &srcViewDesc);
+    ASSERT_NE(srcTextureView, nullptr);
+
+    // 3. Create sampler
+    WGPUSamplerDescriptor samplerDesc = {};
+    samplerDesc.addressModeU = WGPUAddressMode_Repeat;
+    samplerDesc.addressModeV = WGPUAddressMode_Repeat;
+    samplerDesc.addressModeW = WGPUAddressMode_Repeat;
+    samplerDesc.magFilter = WGPUFilterMode_Linear;
+    samplerDesc.minFilter = WGPUFilterMode_Nearest;
+    samplerDesc.mipmapFilter = WGPUMipmapFilterMode_Linear;
+    samplerDesc.lodMinClamp = 0;
+    samplerDesc.lodMaxClamp = 1;
+    samplerDesc.compare = WGPUCompareFunction_Undefined;
+    samplerDesc.maxAnisotropy = 1;
+
+    WGPUSampler sampler = wgpuDeviceCreateSampler(device, &samplerDesc);
+    ASSERT_NE(sampler, nullptr);
+
+    // 4. Create bind group layout and bind group
+    WGPUBindGroupLayoutEntry layoutEntries[2] = {};
+    layoutEntries[0].binding = 0;
+    layoutEntries[0].visibility = WGPUShaderStage_Fragment;
+    layoutEntries[0].texture.sampleType = WGPUTextureSampleType_Float;
+    layoutEntries[0].texture.viewDimension = WGPUTextureViewDimension_2D;
+    layoutEntries[1].binding = 1;
+    layoutEntries[1].visibility = WGPUShaderStage_Fragment;
+    layoutEntries[1].sampler.type = WGPUSamplerBindingType_Filtering;
+
+    WGPUBindGroupLayoutDescriptor bglDesc = {};
+    bglDesc.entryCount = 2;
+    bglDesc.entries = layoutEntries;
+    WGPUBindGroupLayout bindGroupLayout = wgpuDeviceCreateBindGroupLayout(device, &bglDesc);
+    ASSERT_NE(bindGroupLayout, nullptr);
+
+    WGPUBindGroupEntry bgEntries[2] = {};
+    bgEntries[0].binding = 0;
+    bgEntries[0].textureView = srcTextureView;
+    bgEntries[1].binding = 1;
+    bgEntries[1].sampler = sampler;
+
+    WGPUBindGroupDescriptor bgDesc = {};
+    bgDesc.layout = bindGroupLayout;
+    bgDesc.entryCount = 2;
+    bgDesc.entries = bgEntries;
+    WGPUBindGroup bindGroup = wgpuDeviceCreateBindGroup(device, &bgDesc);
+    ASSERT_NE(bindGroup, nullptr);
+
+    // 5. Create pipeline layout
+    WGPUPipelineLayoutDescriptor plDesc = {};
+    plDesc.bindGroupLayoutCount = 1;
+    plDesc.bindGroupLayouts = &bindGroupLayout;
+    WGPUPipelineLayout pipelineLayout = wgpuDeviceCreatePipelineLayout(device, &plDesc);
+    ASSERT_NE(pipelineLayout, nullptr);
+
+    // 6. Create render pipeline with override constant brightness=1.0
+    WGPUConstantEntry brightnessConstant = {};
+    brightnessConstant.key = { "brightness", 10 };
+    brightnessConstant.value = 1.0;
+
+    WGPUVertexAttribute vertexAttributes[2] = {};
+    vertexAttributes[0].shaderLocation = 0;
+    vertexAttributes[0].format = WGPUVertexFormat_Float32x2;
+    vertexAttributes[0].offset = 0;
+    vertexAttributes[1].shaderLocation = 1;
+    vertexAttributes[1].format = WGPUVertexFormat_Float32x2;
+    vertexAttributes[1].offset = 2 * sizeof(float);
+
+    WGPUVertexBufferLayout vbLayout = {};
+    vbLayout.arrayStride = 4 * sizeof(float);
+    vbLayout.attributeCount = 2;
+    vbLayout.attributes = vertexAttributes;
+    vbLayout.stepMode = WGPUVertexStepMode_Vertex;
+
+    WGPUColorTargetState colorTarget = {};
+    colorTarget.format = WGPUTextureFormat_RGBA8Unorm;
+    colorTarget.writeMask = WGPUColorWriteMask_All;
+
+    WGPUFragmentState fragmentState = {};
+    fragmentState.module = shaderModule;
+    fragmentState.entryPoint = { "fs_main", 7 };
+    fragmentState.constantCount = 1;
+    fragmentState.constants = &brightnessConstant;
+    fragmentState.targetCount = 1;
+    fragmentState.targets = &colorTarget;
+
+    WGPURenderPipelineDescriptor pipeDesc = {};
+    pipeDesc.layout = pipelineLayout;
+    pipeDesc.vertex.module = shaderModule;
+    pipeDesc.vertex.entryPoint = { "vs_main", 7 };
+    pipeDesc.vertex.bufferCount = 1;
+    pipeDesc.vertex.buffers = &vbLayout;
+    pipeDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    pipeDesc.primitive.cullMode = WGPUCullMode_None;
+    pipeDesc.primitive.frontFace = WGPUFrontFace_CCW;
+    pipeDesc.multisample.count = 1;
+    pipeDesc.multisample.mask = 0xFFFFFFFF;
+    pipeDesc.fragment = &fragmentState;
+
+    WGPURenderPipeline pipeline = wgpuDeviceCreateRenderPipeline(device, &pipeDesc);
+    ASSERT_NE(pipeline, nullptr) << "Failed to create render pipeline with WGSL override shader";
+
+    // 7. Create fullscreen quad vertex + index buffers
+    // Quad covers [-1, -1] to [1, 1] with UVs [0,0] to [1,1]
+    float quadVerts[] = {
+        -1.0f, -1.0f,  0.0f, 0.0f,  // bottom-left
+         1.0f, -1.0f,  1.0f, 0.0f,  // bottom-right
+         1.0f,  1.0f,  1.0f, 1.0f,  // top-right
+        -1.0f,  1.0f,  0.0f, 1.0f,  // top-left
+    };
+    uint32_t quadIndices[] = { 0, 1, 2, 0, 2, 3 };
+
+    WGPUBufferDescriptor vbDesc = {};
+    vbDesc.size = sizeof(quadVerts);
+    vbDesc.usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst;
+    WGPUBuffer vertexBuffer = wgpuDeviceCreateBuffer(device, &vbDesc);
+    wgpuQueueWriteBuffer(queue, vertexBuffer, 0, quadVerts, sizeof(quadVerts));
+
+    WGPUBufferDescriptor ibDesc = {};
+    ibDesc.size = sizeof(quadIndices);
+    ibDesc.usage = WGPUBufferUsage_Index | WGPUBufferUsage_CopyDst;
+    WGPUBuffer indexBuffer = wgpuDeviceCreateBuffer(device, &ibDesc);
+    wgpuQueueWriteBuffer(queue, indexBuffer, 0, quadIndices, sizeof(quadIndices));
+
+    // 8. Create render target texture and readback buffer
+    WGPUTextureDescriptor rtDesc = {};
+    rtDesc.size = {width, height, 1};
+    rtDesc.format = WGPUTextureFormat_RGBA8Unorm;
+    rtDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+    rtDesc.mipLevelCount = 1;
+    rtDesc.sampleCount = 1;
+    rtDesc.dimension = WGPUTextureDimension_2D;
+    WGPUTexture renderTarget = wgpuDeviceCreateTexture(device, &rtDesc);
+    ASSERT_NE(renderTarget, nullptr);
+
+    WGPUTextureView rtView = wgpuTextureCreateView(renderTarget, nullptr);
+    ASSERT_NE(rtView, nullptr);
+
+    WGPUBufferDescriptor readBufDesc = {};
+    readBufDesc.size = bufferSize;
+    readBufDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+    WGPUBuffer readBuffer = wgpuDeviceCreateBuffer(device, &readBufDesc);
+    ASSERT_NE(readBuffer, nullptr);
+
+    // 9. Encode render pass + copy to readback buffer
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+
+    WGPURenderPassColorAttachment colorAtt = {};
+    colorAtt.view = rtView;
+    colorAtt.loadOp = WGPULoadOp_Clear;
+    colorAtt.storeOp = WGPUStoreOp_Store;
+    colorAtt.clearValue = {0.0, 0.0, 0.0, 0.0}; // Clear to black/transparent
+
+    WGPURenderPassDescriptor rpDesc = {};
+    rpDesc.colorAttachmentCount = 1;
+    rpDesc.colorAttachments = &colorAtt;
+
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &rpDesc);
+    wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+    wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+    wgpuRenderPassEncoderSetVertexBuffer(pass, 0, vertexBuffer, 0, WGPU_WHOLE_SIZE);
+    wgpuRenderPassEncoderSetIndexBuffer(pass, indexBuffer, WGPUIndexFormat_Uint32, 0, WGPU_WHOLE_SIZE);
+    wgpuRenderPassEncoderDrawIndexed(pass, 6, 1, 0, 0, 0);
+    wgpuRenderPassEncoderEnd(pass);
+    wgpuRenderPassEncoderRelease(pass);
+
+    WGPUTexelCopyTextureInfo srcInfo = {};
+    srcInfo.texture = renderTarget;
+    srcInfo.aspect = WGPUTextureAspect_All;
+
+    WGPUTexelCopyBufferInfo dstInfo = {};
+    dstInfo.buffer = readBuffer;
+    dstInfo.layout.bytesPerRow = bytesPerRow;
+    dstInfo.layout.rowsPerImage = height;
+
+    WGPUExtent3D copySize = {width, height, 1};
+    wgpuCommandEncoderCopyTextureToBuffer(encoder, &srcInfo, &dstInfo, &copySize);
+
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, nullptr);
+    wgpuCommandEncoderRelease(encoder);
+
+    // 10. Submit
+    wgpuQueueSubmit(queue, 1, &cmd);
+    wgpuCommandBufferRelease(cmd);
+
+    // 11. Map and verify pixels
+    struct MapCtx { bool done = false; } mapCtx;
+    auto mapCb = [](WGPUMapAsyncStatus, WGPUStringView, void* ud, void*) {
+        ((MapCtx*)ud)->done = true;
+    };
+    WGPUBufferMapCallbackInfo mapCbInfo = { nullptr, WGPUCallbackMode_WaitAnyOnly, mapCb, &mapCtx, nullptr };
+
+    WGPUFuture mapFut = wgpuBufferMapAsync(readBuffer, WGPUMapMode_Read, 0, bufferSize, mapCbInfo);
+    WGPUFutureWaitInfo fwi = { mapFut, 0 };
+    while (!mapCtx.done) {
+        wgpuInstanceWaitAny(instance, 1, &fwi, UINT64_MAX);
+    }
+
+    const uint8_t* pixels = (const uint8_t*)wgpuBufferGetConstMappedRange(readBuffer, 0, bufferSize);
+    ASSERT_NE(pixels, nullptr);
+
+    // Check that pixels are NOT all zero (brightness=1.0 means texture data should show through)
+    // Sample a few pixels across the render target
+    uint32_t nonZeroCount = 0;
+    for (uint32_t y = 0; y < height; y += 8) {
+        for (uint32_t x = 0; x < width; x += 8) {
+            size_t offset = y * bytesPerRow + x * 4;
+            uint8_t r = pixels[offset + 0];
+            uint8_t g = pixels[offset + 1];
+            uint8_t b = pixels[offset + 2];
+            uint8_t a = pixels[offset + 3];
+            if (r > 0 || g > 0 || b > 0 || a > 0) {
+                nonZeroCount++;
+            }
+        }
+    }
+
+    // With brightness=1.0 and non-zero texture data, we expect the vast majority of
+    // sampled pixels to be non-zero. The fullscreen quad covers everything.
+    EXPECT_GT(nonZeroCount, 0u) << "All sampled pixels are zero - shader output is blank";
+    EXPECT_GE(nonZeroCount, 32u) << "Too few non-zero pixels - expected most of the " << (8 * 8) << " samples to be non-zero";
+
+    // Also verify the center pixel specifically
+    {
+        size_t offset = (height / 2) * bytesPerRow + (width / 2) * 4;
+        uint8_t r = pixels[offset + 0];
+        uint8_t g = pixels[offset + 1];
+        uint8_t b = pixels[offset + 2];
+        EXPECT_TRUE(r > 0 || g > 0 || b > 0) << "Center pixel is black (r=" << (int)r << " g=" << (int)g << " b=" << (int)b << ")";
+    }
+
+    wgpuBufferUnmap(readBuffer);
+
+    // 12. Cleanup
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        wgpuDeviceTick(device);
+    }
+
+    wgpuBufferRelease(readBuffer);
+    wgpuBufferRelease(vertexBuffer);
+    wgpuBufferRelease(indexBuffer);
+    wgpuTextureViewRelease(rtView);
+    wgpuTextureRelease(renderTarget);
+    wgpuBindGroupRelease(bindGroup);
+    wgpuBindGroupLayoutRelease(bindGroupLayout);
+    wgpuPipelineLayoutRelease(pipelineLayout);
+    wgpuRenderPipelineRelease(pipeline);
+    wgpuTextureViewRelease(srcTextureView);
+    wgpuTextureRelease(srcTexture);
+    wgpuSamplerRelease(sampler);
+    wgpuShaderModuleRelease(shaderModule);
+}
+
 TEST_F(WebGPUTest, LimitsGetAndSet) {
     // Get limits from adapter
     WGPULimits adapterLimits = {0};
