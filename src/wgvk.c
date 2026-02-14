@@ -6158,6 +6158,22 @@ WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, const WGP
             }
         }
     }
+    VkSpecializationInfo computeSpecInfo = {0};
+    float computeConstantBuffer[32];
+    VkSpecializationMapEntry computeMapEntries[32];
+    if(descriptor->compute.constantCount){
+        computeSpecInfo.pData = computeConstantBuffer;
+        for(uint32_t i = 0;i < descriptor->compute.constantCount;i++){
+            computeConstantBuffer[i] = (float)descriptor->compute.constants[i].value;
+            computeMapEntries[i].constantID = i;
+            computeMapEntries[i].offset = i * sizeof(float);
+            computeMapEntries[i].size = sizeof(float);
+        }
+        computeSpecInfo.dataSize = descriptor->compute.constantCount * sizeof(float);
+        computeSpecInfo.mapEntryCount = descriptor->compute.constantCount;
+        computeSpecInfo.pMapEntries = computeMapEntries;
+    }
+
     VkPipelineShaderStageCreateInfo computeStage = {
         VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
         NULL,
@@ -6165,7 +6181,7 @@ WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, const WGP
         VK_SHADER_STAGE_COMPUTE_BIT,
         vkModule,
         namebuffer,
-        NULL
+        descriptor->compute.constantCount ? &computeSpecInfo : NULL
     };
 
     const VkComputePipelineCreateInfo cpci = {
@@ -6219,17 +6235,17 @@ WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice device, const WGPUR
     }
     
     VkSpecializationInfo vertexSpecInfo = {0};
-    double vertexConstantBuffer[32];
+    float vertexConstantBuffer[32];
     VkSpecializationMapEntry vertexMapEntries[32];
     if(descriptor->vertex.constantCount){
         vertexSpecInfo.pData = vertexConstantBuffer;
         for(uint32_t i = 0;i < descriptor->vertex.constantCount;i++){
-            vertexConstantBuffer[i] = descriptor->vertex.constants[i].value;
+            vertexConstantBuffer[i] = (float)descriptor->vertex.constants[i].value;
             vertexMapEntries[i].constantID = i;
-            vertexMapEntries[i].offset = i * sizeof(double);
-            vertexMapEntries[i].size = 8;
+            vertexMapEntries[i].offset = i * sizeof(float);
+            vertexMapEntries[i].size = sizeof(float);
         }
-        vertexSpecInfo.dataSize = descriptor->vertex.constantCount * sizeof(double);
+        vertexSpecInfo.dataSize = descriptor->vertex.constantCount * sizeof(float);
         vertexSpecInfo.mapEntryCount = descriptor->vertex.constantCount;
         vertexSpecInfo.pMapEntries = vertexMapEntries;
         vertShaderStageInfo.pSpecializationInfo = &vertexSpecInfo;
@@ -6242,7 +6258,7 @@ WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice device, const WGPUR
     VkPipelineShaderStageCreateInfo fragShaderStageInfo zeroinit;
 
     VkSpecializationInfo fragmentSpecInfo = {0};
-    double fragmentConstantBuffer[32] ;
+    float fragmentConstantBuffer[32];
     VkSpecializationMapEntry fragmentMapEntries[32];
     if (descriptor->fragment) {
         fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -6259,12 +6275,12 @@ WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice device, const WGPUR
         if(descriptor->fragment->constantCount){
             fragmentSpecInfo.pData = fragmentConstantBuffer;
             for(uint32_t i = 0;i < descriptor->fragment->constantCount;i++){
-                fragmentConstantBuffer[i] = descriptor->fragment->constants[i].value;
+                fragmentConstantBuffer[i] = (float)descriptor->fragment->constants[i].value;
                 fragmentMapEntries[i].constantID = i;
-                fragmentMapEntries[i].offset = i * sizeof(double);
-                fragmentMapEntries[i].size = sizeof(i);
+                fragmentMapEntries[i].offset = i * sizeof(float);
+                fragmentMapEntries[i].size = sizeof(float);
             }
-            fragmentSpecInfo.dataSize = descriptor->fragment->constantCount * sizeof(double);
+            fragmentSpecInfo.dataSize = descriptor->fragment->constantCount * sizeof(float);
             fragmentSpecInfo.mapEntryCount = descriptor->fragment->constantCount;
             fragmentSpecInfo.pMapEntries = fragmentMapEntries;
             fragShaderStageInfo.pSpecializationInfo = &fragmentSpecInfo;

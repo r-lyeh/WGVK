@@ -4,7 +4,11 @@ include(FetchContent)
 
 option(WGVK_BUILD_EXAMPLES "Build some WGVK examples" OFF)
 option(WGVK_BUILD_GLSL_SUPPORT "Build the GLSL->SPIRV compiler (glslang)" OFF)
-option(WGVK_BUILD_WGSL_SUPPORT "Build the WGSL->SPIRV compiler (tint)" OFF)
+set(WGVK_WGSL_SUPPORT "OFF" CACHE STRING "WGSL->SPIRV backend: OFF, TINT, SIMPLE_WGSL")
+set_property(CACHE WGVK_WGSL_SUPPORT PROPERTY STRINGS "OFF" "TINT" "SIMPLE_WGSL")
+if(NOT WGVK_WGSL_SUPPORT STREQUAL "OFF" AND NOT WGVK_WGSL_SUPPORT STREQUAL "TINT" AND NOT WGVK_WGSL_SUPPORT STREQUAL "SIMPLE_WGSL")
+  message(FATAL_ERROR "WGVK_WGSL_SUPPORT must be OFF, TINT, or SIMPLE_WGSL (got: ${WGVK_WGSL_SUPPORT})")
+endif()
 option(WGVK_USE_VMA "Use GPUOpen's VMA allocator (Requires C++)" OFF)
 option(WGVK_SUPPORT_DRM "Support Direct Rendering Infrastructure Surfaces (Linux)" OFF)
 if(EMSCRIPTEN)
@@ -83,7 +87,7 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-DNDEBUG -g3 -O3")
 
 # We define a variable to hold the name of the main library target.
 # This avoids repeating `if/else` logic for setting properties.
-if(WGVK_BUILD_GLSL_SUPPORT OR WGVK_BUILD_WGSL_SUPPORT)
+if(WGVK_BUILD_GLSL_SUPPORT OR NOT WGVK_WGSL_SUPPORT STREQUAL "OFF")
   set(WGVK_PRIMARY_TARGET_NAME "wgvk_core")
   add_library(${WGVK_PRIMARY_TARGET_NAME} STATIC ${WGVK_CORE_SRC_LIST})
 else()
@@ -117,12 +121,10 @@ target_compile_options(${WGVK_PRIMARY_TARGET_NAME} PRIVATE
 )
 
 
-if(WGVK_BUILD_WGSL_SUPPORT)
-  
+if(WGVK_WGSL_SUPPORT STREQUAL "TINT")
+
   target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC RG_STATIC=1 SUPPORT_WGSL=1 WGVK_DISABLE_ASSERT=1)
-  #if(NOT EMSCRIPTEN)
   target_include_directories(${WGVK_PRIMARY_TARGET_NAME} PUBLIC include)
-  #endif()
   option(DAWN_ENABLE_DESKTOP_GL "" OFF)
   option(DAWN_ENABLE_OPENGLES "" OFF)
   option(DAWN_ENABLE_VULKAN "" OFF)
@@ -163,9 +165,37 @@ if(WGVK_BUILD_WGSL_SUPPORT)
     $<$<CXX_COMPILER_ID:MSVC>:/GR->  # disable RTTI in MSVC
   )
   target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC SUPPORT_WGSL=1)
-  
-  # Bundle wgvk_core and its dependencies into the final `wgvk` library.
+
   list(APPEND BUNDLE_LIST ${WGVK_PRIMARY_TARGET_NAME} tint_lang_wgsl_reader tint_lang_spirv_writer tint_lang_wgsl_inspector tint_c_api)
+
+elseif(WGVK_WGSL_SUPPORT STREQUAL "SIMPLE_WGSL")
+
+  target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC RG_STATIC=1 SUPPORT_WGSL=1 WGVK_DISABLE_ASSERT=1)
+  target_include_directories(${WGVK_PRIMARY_TARGET_NAME} PUBLIC include)
+
+  if(NOT TARGET wgsl_compiler)
+    set(WGSL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(SIMPLE_WGSL_LOCAL "${CMAKE_CURRENT_LIST_DIR}/../simple_wgsl")
+    if(EXISTS "${SIMPLE_WGSL_LOCAL}/CMakeLists.txt")
+      add_subdirectory("${SIMPLE_WGSL_LOCAL}" "${CMAKE_CURRENT_BINARY_DIR}/simple_wgsl")
+    else()
+      FetchContent_Declare(
+        simple_wgsl
+        GIT_REPOSITORY https://github.com/manuel5975p/simple_wgsl.git
+        GIT_TAG        master
+        GIT_SHALLOW    True
+      )
+      FetchContent_MakeAvailable(simple_wgsl)
+    endif()
+  endif()
+
+  add_library(simple_wgsl_c_api STATIC "src/simple_wgsl_c_api.c")
+  target_include_directories(simple_wgsl_c_api PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+  target_link_libraries(simple_wgsl_c_api PUBLIC wgsl_compiler)
+  target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC SUPPORT_WGSL=1)
+
+  list(APPEND BUNDLE_LIST ${WGVK_PRIMARY_TARGET_NAME} wgsl_compiler simple_wgsl_c_api)
+
 endif()
 
 if(WGVK_BUILD_GLSL_SUPPORT)
@@ -200,7 +230,7 @@ if(WGVK_BUILD_GLSL_SUPPORT)
   )
 endif()
 
-if(WGVK_BUILD_GLSL_SUPPORT OR WGVK_BUILD_WGSL_SUPPORT)
+if(WGVK_BUILD_GLSL_SUPPORT OR NOT WGVK_WGSL_SUPPORT STREQUAL "OFF")
   if(BUILD_SHARED_LIBS)
     wgvk_bundle_libraries(wgvk ${WGVK_PRIMARY_TARGET_NAME} TYPE SHARED ${BUNDLE_LIST})
   else()
@@ -225,8 +255,10 @@ if(BUILD_SHARED_LIBS)
   if(NOT APPLE)
     target_link_options(wgvk PRIVATE "-static")
   endif()
-  if(WGVK_BUILD_WGSL_SUPPORT)
-  set_target_properties(tint_c_api PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  if(WGVK_WGSL_SUPPORT STREQUAL "TINT")
+    set_target_properties(tint_c_api PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  elseif(WGVK_WGSL_SUPPORT STREQUAL "SIMPLE_WGSL")
+    set_target_properties(simple_wgsl_c_api PROPERTIES POSITION_INDEPENDENT_CODE ON)
   endif()
 endif()
 
